@@ -13,6 +13,8 @@ import { getPeopleToolDefinitions, handlePeopleTool } from './tools/people.js';
 import { getGroupsToolDefinitions, handleGroupsTool } from './tools/groups.js';
 import { getRegistrationsToolDefinitions, handleRegistrationsTool } from './tools/registrations.js';
 import { getCheckInsToolDefinitions, handleCheckInsTool } from './tools/checkins.js';
+import { getGivingToolDefinitions, handleGivingTool } from './tools/giving.js';
+import { getAnalyticsToolDefinitions, handleAnalyticsTool } from './tools/analytics.js';
 import { PCO_CONTEXT_PROMPT, PCO_CONTEXT_CONTENT } from './prompts/pco-context.js';
 
 dotenv.config();
@@ -43,6 +45,8 @@ const allTools = [
   ...getGroupsToolDefinitions(),
   ...getRegistrationsToolDefinitions(),
   ...getCheckInsToolDefinitions(),
+  ...getGivingToolDefinitions(),
+  ...getAnalyticsToolDefinitions(),
 ];
 
 // Map tool names to their module handlers
@@ -51,6 +55,8 @@ const peopleTools = new Set(getPeopleToolDefinitions().map((t) => t.name));
 const groupsTools = new Set(getGroupsToolDefinitions().map((t) => t.name));
 const registrationsTools = new Set(getRegistrationsToolDefinitions().map((t) => t.name));
 const checkInsTools = new Set(getCheckInsToolDefinitions().map((t) => t.name));
+const givingTools = new Set(getGivingToolDefinitions().map((t) => t.name));
+const analyticsTools = new Set(getAnalyticsToolDefinitions().map((t) => t.name));
 
 // Register tools/list handler
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -73,6 +79,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     result = await handleRegistrationsTool(name, args as Record<string, unknown>, client);
   } else if (checkInsTools.has(name)) {
     result = await handleCheckInsTool(name, args as Record<string, unknown>, client);
+  } else if (givingTools.has(name)) {
+    result = await handleGivingTool(name, args as Record<string, unknown>, client);
+  } else if (analyticsTools.has(name)) {
+    result = await handleAnalyticsTool(name, args as Record<string, unknown>, client);
   } else {
     result = JSON.stringify({
       success: false,

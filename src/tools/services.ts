@@ -248,6 +248,59 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
+      case 'get_plan_items': {
+        const schema = z.object({
+          serviceTypeId: z.string(),
+          planId: z.string(),
+        });
+        const parsed = schema.parse(args);
+
+        const endpoint = `/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/items`;
+        const response = await client.get<any>(endpoint, {
+          include: 'song,arrangement,key',
+          per_page: 100,
+        });
+
+        const items = Array.isArray(response.data)
+          ? response.data.map((r: any) => {
+              const flat = client.flatten(r);
+              // Resolve included song if present
+              const songRel = r.relationships?.song?.data;
+              if (songRel && response.included) {
+                const song = client.resolveIncludes(songRel.id, 'Song', response.included);
+                if (song) {
+                  (flat as any).song = song;
+                }
+              }
+              // Resolve arrangement
+              const arrRel = r.relationships?.arrangement?.data;
+              if (arrRel && response.included) {
+                const arr = client.resolveIncludes(arrRel.id, 'Arrangement', response.included);
+                if (arr) {
+                  (flat as any).arrangement = arr;
+                }
+              }
+              // Resolve key
+              const keyRel = r.relationships?.key?.data;
+              if (keyRel && response.included) {
+                const key = client.resolveIncludes(keyRel.id, 'Key', response.included);
+                if (key) {
+                  (flat as any).key = key;
+                }
+              }
+              return flat;
+            })
+          : [];
+
+        const result = toolSuccess(items, {
+          count: items.length,
+          totalCount: response.meta?.total_count,
+          pcoEndpoint: endpoint,
+          executionMs: Date.now() - start,
+        });
+        return JSON.stringify(result);
+      }
+
       case 'get_service_attendance': {
         const schema = z.object({ planId: z.string() });
         const parsed = schema.parse(args);
@@ -266,6 +319,138 @@ export async function handleServicesTool(
           executionMs: Date.now() - start,
         });
         return JSON.stringify(result);
+      }
+
+      case 'analyze_volunteer_scheduling': {
+        const schema = z.object({
+          serviceTypeId: z.string(),
+          weeks: z.number().optional().default(12),
+        });
+        const parsed = schema.parse(args);
+
+        const startDate = new Date();
+        startDate.setUTCDate(startDate.getUTCDate() - parsed.weeks * 7);
+
+        // Get past plans
+        const { items: plans } = await client.paginate(
+          `/services/v2/service_types/${parsed.serviceTypeId}/plans`,
+          { filter: 'past', order: '-sort_date' }
+        );
+
+        const recentPlans = plans.filter((p: any) => {
+          return new Date(p.sort_date as string) >= startDate;
+        });
+
+        // Aggregate volunteer stats across plans
+        const volunteerStats: Record<string, {
+          name: string;
+          totalScheduled: number;
+          confirmed: number;
+          declined: number;
+          unscheduled: number;
+          pending: number;
+          positions: Set<string>;
+        }> = {};
+
+        const teamStats: Record<string, {
+          name: string;
+          totalSlots: number;
+          filled: number;
+          unfilled: number;
+        }> = {};
+
+        for (const plan of recentPlans.slice(0, 20)) {
+          const planId = (plan as any).id as string;
+          try {
+            const response = await client.get<any>(
+              `/services/v2/service_types/${parsed.serviceTypeId}/plans/${planId}/team_members`,
+              { per_page: 100 }
+            );
+            const members = Array.isArray(response.data)
+              ? response.data.map((r: any) => client.flatten(r))
+              : [];
+
+            for (const m of members) {
+              const memberName = (m as any).name as string;
+              const status = (m as any).status as string;
+              const position = (m as any).team_position_name as string || 'Unknown';
+
+              if (memberName && memberName !== 'Needed Position') {
+                if (!volunteerStats[memberName]) {
+                  volunteerStats[memberName] = {
+                    name: memberName,
+                    totalScheduled: 0,
+                    confirmed: 0,
+                    declined: 0,
+                    unscheduled: 0,
+                    pending: 0,
+                    positions: new Set(),
+                  };
+                }
+                volunteerStats[memberName].totalScheduled++;
+                volunteerStats[memberName].positions.add(position);
+                if (status === 'C') volunteerStats[memberName].confirmed++;
+                else if (status === 'D') volunteerStats[memberName].declined++;
+                else if (status === 'U') volunteerStats[memberName].unscheduled++;
+                else if (status === 'P') volunteerStats[memberName].pending++;
+              }
+
+              // Team stats
+              if (!teamStats[position]) {
+                teamStats[position] = { name: position, totalSlots: 0, filled: 0, unfilled: 0 };
+              }
+              teamStats[position].totalSlots++;
+              if (status === 'C') teamStats[position].filled++;
+              else teamStats[position].unfilled++;
+            }
+          } catch {
+            // Skip inaccessible plans
+          }
+        }
+
+        // Convert to arrays and compute reliability
+        const volunteers = Object.values(volunteerStats)
+          .map((v) => ({
+            name: v.name,
+            totalScheduled: v.totalScheduled,
+            confirmed: v.confirmed,
+            declined: v.declined,
+            reliabilityRate: v.totalScheduled > 0
+              ? `${Math.round((v.confirmed / v.totalScheduled) * 100)}%`
+              : 'N/A',
+            positions: Array.from(v.positions),
+          }))
+          .sort((a, b) => b.totalScheduled - a.totalScheduled);
+
+        const teams = Object.values(teamStats)
+          .map((t) => ({
+            ...t,
+            fillRate: t.totalSlots > 0
+              ? `${Math.round((t.filled / t.totalSlots) * 100)}%`
+              : 'N/A',
+          }))
+          .sort((a, b) => b.totalSlots - a.totalSlots);
+
+        // Identify chronic no-shows (high decline rate)
+        const chronicDecliners = volunteers
+          .filter((v) => v.totalScheduled >= 3 && parseInt(v.reliabilityRate) < 50)
+          .slice(0, 20);
+
+        return JSON.stringify(toolSuccess(
+          {
+            plansAnalyzed: recentPlans.length,
+            weeksSpan: parsed.weeks,
+            topVolunteers: volunteers.slice(0, 30),
+            teamFillRates: teams,
+            chronicDecliners,
+            totalUniqueVolunteers: volunteers.length,
+          },
+          {
+            count: volunteers.length,
+            pcoEndpoint: `/services/v2/service_types/${parsed.serviceTypeId}/plans/*/team_members`,
+            executionMs: Date.now() - start,
+          }
+        ));
       }
 
       case 'search_songs': {
@@ -359,6 +544,19 @@ export function getServicesToolDefinitions() {
       },
     },
     {
+      name: 'get_plan_items',
+      description:
+        'Get the full service order/rundown for a specific plan — every item in sequence including songs (with title, author, key, arrangement), headers, media, and item notes. Use get_service_types and get_upcoming_services first to find serviceTypeId and planId.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          serviceTypeId: { type: 'string', description: 'The service type ID (from get_service_types)' },
+          planId: { type: 'string', description: 'The plan ID (from get_upcoming_services)' },
+        },
+        required: ['serviceTypeId', 'planId'],
+      },
+    },
+    {
       name: 'get_service_attendance',
       description:
         'Get headcount attendance for a past service plan. Returns plan time data with any available headcount information.',
@@ -368,6 +566,19 @@ export function getServicesToolDefinitions() {
           planId: { type: 'string', description: 'The plan ID' },
         },
         required: ['planId'],
+      },
+    },
+    {
+      name: 'analyze_volunteer_scheduling',
+      description:
+        'Analyze volunteer scheduling patterns over the last N weeks for a service type. Returns: top volunteers by frequency, reliability rates (confirmed vs declined), team fill rates, and chronic decliners. Use for "who are our most reliable volunteers", "which teams are understaffed", or "predict staffing needs" questions.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          serviceTypeId: { type: 'string', description: 'The service type ID' },
+          weeks: { type: 'number', description: 'Weeks of history to analyze (default 12)' },
+        },
+        required: ['serviceTypeId'],
       },
     },
     {

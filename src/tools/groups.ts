@@ -154,6 +154,74 @@ export async function handleGroupsTool(
         }));
       }
 
+      case 'get_group_enrollment_stats': {
+        // Aggregate stats across all groups: total members, avg group size, enrollment strategies
+        const { items: groups, totalCount } = await client.paginate(
+          '/groups/v2/groups',
+          { order: 'name', per_page: 100 }
+        );
+
+        let totalMembers = 0;
+        let groupsWithZeroMembers = 0;
+        const enrollmentStrategies: Record<string, number> = {};
+        const sizeDistribution = { small: 0, medium: 0, large: 0 }; // <5, 5-15, >15
+
+        for (const group of groups) {
+          const g = group as any;
+          const memberCount = (g.memberships_count as number) ?? 0;
+          totalMembers += memberCount;
+
+          if (memberCount === 0) groupsWithZeroMembers++;
+          if (memberCount < 5) sizeDistribution.small++;
+          else if (memberCount <= 15) sizeDistribution.medium++;
+          else sizeDistribution.large++;
+
+          const strategy = (g.enrollment_strategy as string) ?? 'unknown';
+          enrollmentStrategies[strategy] = (enrollmentStrategies[strategy] ?? 0) + 1;
+        }
+
+        const avgGroupSize = groups.length > 0
+          ? Math.round((totalMembers / groups.length) * 10) / 10
+          : 0;
+
+        // Largest and smallest groups
+        const sortedBySize = [...groups].sort(
+          (a: any, b: any) => (b.memberships_count ?? 0) - (a.memberships_count ?? 0)
+        );
+        const largest = sortedBySize.slice(0, 5).map((g: any) => ({
+          id: g.id,
+          name: g.name,
+          memberships_count: g.memberships_count,
+        }));
+        const smallest = sortedBySize
+          .filter((g: any) => (g.memberships_count ?? 0) > 0)
+          .slice(-5)
+          .map((g: any) => ({
+            id: g.id,
+            name: g.name,
+            memberships_count: g.memberships_count,
+          }));
+
+        return JSON.stringify(toolSuccess(
+          {
+            totalGroups: totalCount,
+            totalMembers,
+            averageGroupSize: avgGroupSize,
+            groupsWithZeroMembers,
+            sizeDistribution,
+            enrollmentStrategies,
+            largestGroups: largest,
+            smallestActiveGroups: smallest,
+          },
+          {
+            count: groups.length,
+            totalCount,
+            pcoEndpoint: '/groups/v2/groups',
+            executionMs: Date.now() - start,
+          }
+        ));
+      }
+
       default:
         return JSON.stringify(toolError(`Unknown groups tool: ${name}`));
     }
@@ -226,6 +294,16 @@ export function getGroupsToolDefinitions() {
           groupId: { type: 'string', description: 'Group ID (omit for all groups)' },
           daysAhead: { type: 'number', description: 'Days ahead to look (default 30)' },
         },
+        required: [] as string[],
+      },
+    },
+    {
+      name: 'get_group_enrollment_stats',
+      description:
+        'Aggregate analytics across all groups: total members, average group size, size distribution (small/medium/large), enrollment strategy breakdown, groups with zero members, and the largest/smallest groups. Use for "how is group participation" or "are our small groups healthy" questions.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
         required: [] as string[],
       },
     },
