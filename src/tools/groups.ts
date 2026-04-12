@@ -12,7 +12,7 @@ export async function handleGroupsTool(
 
   try {
     switch (name) {
-      case 'get_group_types': {
+      case 'pco_get_group_types': {
         const { items, totalCount } = await client.paginate(
           '/groups/v2/group_types',
           { order: 'name' }
@@ -26,7 +26,7 @@ export async function handleGroupsTool(
         }));
       }
 
-      case 'list_groups': {
+      case 'pco_list_groups': {
         const schema = z.object({
           groupTypeId: z.string().optional(),
           campus: z.string().optional(),
@@ -63,7 +63,7 @@ export async function handleGroupsTool(
         }));
       }
 
-      case 'get_group_members': {
+      case 'pco_get_group_members': {
         const schema = z.object({ groupId: z.string() });
         const parsed = schema.parse(args);
 
@@ -91,7 +91,7 @@ export async function handleGroupsTool(
         }));
       }
 
-      case 'get_groups_without_leader': {
+      case 'pco_get_groups_without_leader': {
         const { items: groups } = await client.paginate('/groups/v2/groups', {
           order: 'name',
           per_page: 100,
@@ -122,7 +122,7 @@ export async function handleGroupsTool(
         }));
       }
 
-      case 'get_upcoming_group_events': {
+      case 'pco_get_upcoming_group_events': {
         const schema = z.object({
           groupId: z.string().optional(),
           daysAhead: z.number().optional().default(30),
@@ -154,7 +154,7 @@ export async function handleGroupsTool(
         }));
       }
 
-      case 'get_group_enrollment_stats': {
+      case 'pco_get_group_enrollment_stats': {
         // Aggregate stats across all groups: total members, avg group size, enrollment strategies
         const { items: groups, totalCount } = await client.paginate(
           '/groups/v2/groups',
@@ -239,7 +239,7 @@ export async function handleGroupsTool(
 export function getGroupsToolDefinitions() {
   return [
     {
-      name: 'get_group_types',
+      name: 'pco_get_group_types',
       description:
         'Get all group types in Planning Center Groups (e.g., "Small Groups," "Bible Studies"). Call this first when working with groups to find groupTypeId values.',
       inputSchema: {
@@ -249,7 +249,7 @@ export function getGroupsToolDefinitions() {
       },
     },
     {
-      name: 'list_groups',
+      name: 'pco_list_groups',
       description:
         'List active Planning Center groups with member counts. Optionally filter by group type or campus. Use get_group_types first for valid groupTypeId values.',
       inputSchema: {
@@ -263,7 +263,7 @@ export function getGroupsToolDefinitions() {
       },
     },
     {
-      name: 'get_group_members',
+      name: 'pco_get_group_members',
       description:
         'Get all members of a specific group. Returns names, roles (leader/member), and join dates. Use list_groups to find a groupId.',
       inputSchema: {
@@ -275,7 +275,7 @@ export function getGroupsToolDefinitions() {
       },
     },
     {
-      name: 'get_groups_without_leader',
+      name: 'pco_get_groups_without_leader',
       description:
         'Find active groups with no leader assigned. Groups without leaders may be orphaned or need attention. Returns groups with member counts.',
       inputSchema: {
@@ -285,7 +285,7 @@ export function getGroupsToolDefinitions() {
       },
     },
     {
-      name: 'get_upcoming_group_events',
+      name: 'pco_get_upcoming_group_events',
       description:
         'Get upcoming events for a specific group or all groups. Useful for planning, spotting conflicts, and reviewing engagement.',
       inputSchema: {
@@ -298,7 +298,7 @@ export function getGroupsToolDefinitions() {
       },
     },
     {
-      name: 'get_group_enrollment_stats',
+      name: 'pco_get_group_enrollment_stats',
       description:
         'Aggregate analytics across all groups: total members, average group size, size distribution (small/medium/large), enrollment strategy breakdown, groups with zero members, and the largest/smallest groups. Use for "how is group participation" or "are our small groups healthy" questions.',
       inputSchema: {

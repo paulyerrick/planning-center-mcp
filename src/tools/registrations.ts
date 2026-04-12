@@ -12,7 +12,7 @@ export async function handleRegistrationsTool(
 
   try {
     switch (name) {
-      case 'list_events': {
+      case 'pco_list_events': {
         const schema = z.object({
           daysAhead: z.number().optional().default(60),
           limit: z.number().optional().default(25),
@@ -53,7 +53,7 @@ export async function handleRegistrationsTool(
         }));
       }
 
-      case 'get_event_registrations': {
+      case 'pco_get_event_registrations': {
         const schema = z.object({ eventId: z.string() });
         const parsed = schema.parse(args);
 
@@ -71,7 +71,7 @@ export async function handleRegistrationsTool(
         }));
       }
 
-      case 'get_registration_summary': {
+      case 'pco_get_registration_summary': {
         const schema = z.object({ eventId: z.string() });
         const parsed = schema.parse(args);
 
@@ -139,7 +139,7 @@ export async function handleRegistrationsTool(
 export function getRegistrationsToolDefinitions() {
   return [
     {
-      name: 'list_events',
+      name: 'pco_list_events',
       description:
         'List upcoming registration events in Planning Center Registrations. Returns event names, dates, registration counts, capacity, and spots remaining.',
       inputSchema: {
@@ -152,7 +152,7 @@ export function getRegistrationsToolDefinitions() {
       },
     },
     {
-      name: 'get_event_registrations',
+      name: 'pco_get_event_registrations',
       description:
         'Get all registrations (attendees) for a specific event. Returns names, contact info, payment status, and registration date. Use list_events to find eventId.',
       inputSchema: {
@@ -164,7 +164,7 @@ export function getRegistrationsToolDefinitions() {
       },
     },
     {
-      name: 'get_registration_summary',
+      name: 'pco_get_registration_summary',
       description:
         'Get a quick summary of registration numbers: total registered, capacity, spots remaining, paid vs unpaid. Faster than get_event_registrations when you only need counts.',
       inputSchema: {

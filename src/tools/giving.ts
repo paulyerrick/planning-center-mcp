@@ -12,7 +12,7 @@ export async function handleGivingTool(
 
   try {
     switch (name) {
-      case 'get_giving_summary': {
+      case 'pco_get_giving_summary': {
         const schema = z.object({
           startDate: z.string(),
           endDate: z.string(),
@@ -70,7 +70,7 @@ export async function handleGivingTool(
         ));
       }
 
-      case 'get_donations': {
+      case 'pco_get_donations': {
         const schema = z.object({
           startDate: z.string().optional(),
           endDate: z.string().optional(),
@@ -107,7 +107,7 @@ export async function handleGivingTool(
         }));
       }
 
-      case 'get_funds': {
+      case 'pco_get_funds': {
         const { items, totalCount } = await client.paginate(
           '/giving/v2/funds',
           { order: 'name' }
@@ -121,7 +121,7 @@ export async function handleGivingTool(
         }));
       }
 
-      case 'get_fund_donations': {
+      case 'pco_get_fund_donations': {
         const schema = z.object({
           fundId: z.string(),
           startDate: z.string().optional(),
@@ -160,7 +160,7 @@ export async function handleGivingTool(
         ));
       }
 
-      case 'get_donors': {
+      case 'pco_get_donors': {
         const schema = z.object({
           limit: z.number().optional().default(50),
         });
@@ -183,7 +183,7 @@ export async function handleGivingTool(
         }));
       }
 
-      case 'get_giving_trends': {
+      case 'pco_get_giving_trends': {
         const schema = z.object({
           weeks: z.number().optional().default(52),
         });
@@ -275,7 +275,7 @@ export async function handleGivingTool(
         ));
       }
 
-      case 'get_donor_retention': {
+      case 'pco_get_donor_retention': {
         const schema = z.object({
           currentStartDate: z.string(),
           currentEndDate: z.string(),
@@ -366,7 +366,7 @@ export async function handleGivingTool(
 export function getGivingToolDefinitions() {
   return [
     {
-      name: 'get_giving_summary',
+      name: 'pco_get_giving_summary',
       description:
         'Get a summary of giving/donations for a date range: total amount, donation count, average donation, and breakdown by payment method. Use for "how much did we receive this month" or "giving report" questions.',
       inputSchema: {
@@ -379,7 +379,7 @@ export function getGivingToolDefinitions() {
       },
     },
     {
-      name: 'get_donations',
+      name: 'pco_get_donations',
       description:
         'Get individual donation records with optional date filtering. Returns donor info, amounts, payment methods, and fund designations. Use for detailed giving analysis.',
       inputSchema: {
@@ -393,7 +393,7 @@ export function getGivingToolDefinitions() {
       },
     },
     {
-      name: 'get_funds',
+      name: 'pco_get_funds',
       description:
         'List all giving funds configured in Planning Center Giving (e.g., "General Fund", "Missions", "Building Fund"). Returns fund names and IDs needed by get_fund_donations.',
       inputSchema: {
@@ -403,7 +403,7 @@ export function getGivingToolDefinitions() {
       },
     },
     {
-      name: 'get_fund_donations',
+      name: 'pco_get_fund_donations',
       description:
         'Get donations for a specific fund with optional date filtering. Returns individual donations and total amount for the fund. Use get_funds first to find fundId.',
       inputSchema: {
@@ -417,7 +417,7 @@ export function getGivingToolDefinitions() {
       },
     },
     {
-      name: 'get_donors',
+      name: 'pco_get_donors',
       description:
         'List people who have given in Planning Center Giving. Returns donor profiles with giving history. Use for donor analysis and stewardship.',
       inputSchema: {
@@ -429,7 +429,7 @@ export function getGivingToolDefinitions() {
       },
     },
     {
-      name: 'get_giving_trends',
+      name: 'pco_get_giving_trends',
       description:
         'Giving analytics over time: weekly totals, 4-week moving average, period-over-period growth rate, and donation counts. Defaults to 52 weeks. Use for "is giving growing" or "giving trends" questions.',
       inputSchema: {
@@ -441,7 +441,7 @@ export function getGivingToolDefinitions() {
       },
     },
     {
-      name: 'get_donor_retention',
+      name: 'pco_get_donor_retention',
       description:
         'Compare donors across two time periods to calculate retention rate: how many donors from the prior period continued giving in the current period. Also shows lapsed donors and new donors. Use for "are we retaining donors" or "donor churn" questions.',
       inputSchema: {

@@ -12,7 +12,7 @@ export async function handleCheckInsTool(
 
   try {
     switch (name) {
-      case 'get_checkin_events': {
+      case 'pco_get_checkin_events': {
         const { items, totalCount } = await client.paginate(
           '/check-ins/v2/events',
           { order: 'name' }
@@ -26,7 +26,7 @@ export async function handleCheckInsTool(
         }));
       }
 
-      case 'get_attendance_summary': {
+      case 'pco_get_attendance_summary': {
         const schema = z.object({
           eventId: z.string(),
           startDate: z.string(),
@@ -76,7 +76,7 @@ export async function handleCheckInsTool(
         ));
       }
 
-      case 'get_first_time_visitors': {
+      case 'pco_get_first_time_visitors': {
         const schema = z.object({
           eventId: z.string().optional(),
           startDate: z.string(),
@@ -116,7 +116,7 @@ export async function handleCheckInsTool(
         }));
       }
 
-      case 'get_check_in_trend': {
+      case 'pco_get_check_in_trend': {
         const schema = z.object({
           eventId: z.string(),
           weeks: z.number().optional().default(12),
@@ -154,7 +154,7 @@ export async function handleCheckInsTool(
         }));
       }
 
-      case 'analyze_retention': {
+      case 'pco_analyze_retention': {
         const schema = z.object({
           eventId: z.string(),
           startDate: z.string(),
@@ -243,7 +243,7 @@ export async function handleCheckInsTool(
         ));
       }
 
-      case 'get_attendance_trends': {
+      case 'pco_get_attendance_trends': {
         const schema = z.object({
           eventId: z.string(),
           weeks: z.number().optional().default(52),
@@ -337,7 +337,7 @@ export async function handleCheckInsTool(
         ));
       }
 
-      case 'get_headcount_dashboard': {
+      case 'pco_get_headcount_dashboard': {
         const schema = z.object({
           weeks: z.number().optional().default(4),
         });
@@ -425,7 +425,7 @@ export async function handleCheckInsTool(
 export function getCheckInsToolDefinitions() {
   return [
     {
-      name: 'get_checkin_events',
+      name: 'pco_get_checkin_events',
       description:
         'List all check-in events configured in Planning Center Check-Ins. Returns event names and IDs needed by other check-in tools. Start here for any check-in analysis.',
       inputSchema: {
@@ -435,7 +435,7 @@ export function getCheckInsToolDefinitions() {
       },
     },
     {
-      name: 'get_attendance_summary',
+      name: 'pco_get_attendance_summary',
       description:
         'Get total headcount attendance for a check-in event over a date range. Returns total and breakdown by type (regular, guest, volunteer). Useful for weekly reporting.',
       inputSchema: {
@@ -449,7 +449,7 @@ export function getCheckInsToolDefinitions() {
       },
     },
     {
-      name: 'get_first_time_visitors',
+      name: 'pco_get_first_time_visitors',
       description:
         'Get people who checked in for the first time during a date range. Useful for tracking guest volume and follow-up workflows.',
       inputSchema: {
@@ -463,7 +463,7 @@ export function getCheckInsToolDefinitions() {
       },
     },
     {
-      name: 'get_check_in_trend',
+      name: 'pco_get_check_in_trend',
       description:
         'Get week-by-week headcount data for a check-in event. Returns one row per service period for spotting attendance trends over time.',
       inputSchema: {
@@ -476,7 +476,7 @@ export function getCheckInsToolDefinitions() {
       },
     },
     {
-      name: 'analyze_retention',
+      name: 'pco_analyze_retention',
       description:
         'Analyze first-time visitor retention: how many first-time guests returned for a second visit within 60 days. Returns retention rate percentage, counts, and individual return data. Use for "what is our retention rate" or "are first-time visitors coming back" questions.',
       inputSchema: {
@@ -490,7 +490,7 @@ export function getCheckInsToolDefinitions() {
       },
     },
     {
-      name: 'get_attendance_trends',
+      name: 'pco_get_attendance_trends',
       description:
         'Deep attendance analytics for a check-in event: weekly headcounts, 4-week moving average, period-over-period growth rate, peak/trough dates, and guest vs regular breakdown. Defaults to 52 weeks of history. Use for "show me attendance trends" or "is attendance growing or declining" questions.',
       inputSchema: {
@@ -503,7 +503,7 @@ export function getCheckInsToolDefinitions() {
       },
     },
     {
-      name: 'get_headcount_dashboard',
+      name: 'pco_get_headcount_dashboard',
       description:
         'Get a multi-event attendance dashboard for the last N weeks. Returns total headcount, average headcount, and week-by-week trend for every check-in event. Great for a quick "how is attendance across the board" overview.',
       inputSchema: {

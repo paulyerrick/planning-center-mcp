@@ -12,7 +12,7 @@ export async function handleAnalyticsTool(
 
   try {
     switch (name) {
-      case 'correlate_giving_attendance': {
+      case 'pco_correlate_giving_attendance': {
         const schema = z.object({
           startDate: z.string(),
           endDate: z.string(),
@@ -121,7 +121,7 @@ export async function handleAnalyticsTool(
         ));
       }
 
-      case 'correlate_groups_attendance': {
+      case 'pco_correlate_groups_attendance': {
         const schema = z.object({
           startDate: z.string(),
           endDate: z.string(),
@@ -209,7 +209,7 @@ export async function handleAnalyticsTool(
         ));
       }
 
-      case 'correlate_giving_groups': {
+      case 'pco_correlate_giving_groups': {
         const schema = z.object({
           startDate: z.string(),
           endDate: z.string(),
@@ -325,7 +325,7 @@ export async function handleAnalyticsTool(
 export function getAnalyticsToolDefinitions() {
   return [
     {
-      name: 'correlate_giving_attendance',
+      name: 'pco_correlate_giving_attendance',
       description:
         'Cross-reference giving and attendance data: how many donors also attend, how much giving comes from regular attendees vs non-attendees, average attendance frequency for donors. Use for "do people who attend give more" or "what percentage of our giving comes from regular attenders" questions.',
       inputSchema: {
@@ -338,7 +338,7 @@ export function getAnalyticsToolDefinitions() {
       },
     },
     {
-      name: 'correlate_groups_attendance',
+      name: 'pco_correlate_groups_attendance',
       description:
         'Cross-reference group membership and attendance: what percentage of group members also attend services, and what percentage of attendees are in a group. Use for "are group members more engaged" or "how many attendees are not in a group" questions.',
       inputSchema: {
@@ -351,7 +351,7 @@ export function getAnalyticsToolDefinitions() {
       },
     },
     {
-      name: 'correlate_giving_groups',
+      name: 'pco_correlate_giving_groups',
       description:
         'Cross-reference giving and group membership: do group members give more than non-group-members? Returns average giving per donor for group members vs non-members. Use for "do small group members give more" questions.',
       inputSchema: {

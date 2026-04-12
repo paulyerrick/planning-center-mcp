@@ -7,7 +7,7 @@ import { toolSuccess, toolError } from '../response.js';
 export function registerServicesTools(server: Server, client: PlanningCenterClient): void {
   const tools = [
     {
-      name: 'get_service_types',
+      name: 'pco_get_service_types',
       description:
         'Get all service types configured in Planning Center Services (e.g., "Sunday Morning," "Wednesday Night," "Online Campus"). Call this first when working with services to get the serviceTypeId values needed by other tools.',
       inputSchema: {
@@ -17,7 +17,7 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
       },
     },
     {
-      name: 'get_upcoming_services',
+      name: 'pco_get_upcoming_services',
       description:
         'Get upcoming service plans within a date range for a specific service type. Returns plan dates, titles, series titles, and key counts. Use get_service_types first to find the serviceTypeId.',
       inputSchema: {
@@ -30,7 +30,7 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
       },
     },
     {
-      name: 'get_plan_teams',
+      name: 'pco_get_plan_teams',
       description:
         'Get all volunteer teams and their scheduling status for a specific service plan. Shows each team\'s name, how many positions are needed, and how many are filled. Useful for identifying volunteer gaps before a service.',
       inputSchema: {
@@ -42,7 +42,7 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
       },
     },
     {
-      name: 'get_unfilled_positions',
+      name: 'pco_get_unfilled_positions',
       description:
         'Find volunteer positions in upcoming services that have no one scheduled (status U for Unscheduled or D for Declined). Returns service dates, team names, and position names so staff can identify gaps and recruit volunteers.',
       inputSchema: {
@@ -55,7 +55,7 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
       },
     },
     {
-      name: 'get_service_attendance',
+      name: 'pco_get_service_attendance',
       description:
         'Get headcount attendance for a past service plan. Returns total headcount and breakdown by attendance type if available. Use planId from get_upcoming_services or search.',
       inputSchema: {
@@ -67,7 +67,7 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
       },
     },
     {
-      name: 'search_songs',
+      name: 'pco_search_songs',
       description:
         'Search the Planning Center song library by title or author. Returns matching songs with CCLI number, copyright info, and when each was last scheduled. Useful for music planning and licensing audits.',
       inputSchema: {
@@ -98,7 +98,7 @@ export async function handleServicesTool(
 
   try {
     switch (name) {
-      case 'get_service_types': {
+      case 'pco_get_service_types': {
         const { items, totalCount } = await client.paginate(
           '/services/v2/service_types'
         );
@@ -111,7 +111,7 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
-      case 'get_upcoming_services': {
+      case 'pco_get_upcoming_services': {
         const schema = z.object({
           serviceTypeId: z.string(),
           daysAhead: z.number().optional().default(14),
@@ -140,7 +140,7 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
-      case 'get_plan_teams': {
+      case 'pco_get_plan_teams': {
         const schema = z.object({ planId: z.string() });
         const parsed = schema.parse(args);
 
@@ -186,7 +186,7 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
-      case 'get_unfilled_positions': {
+      case 'pco_get_unfilled_positions': {
         const schema = z.object({
           serviceTypeId: z.string(),
           daysAhead: z.number().optional().default(14),
@@ -248,7 +248,7 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
-      case 'get_plan_items': {
+      case 'pco_get_plan_items': {
         const schema = z.object({
           serviceTypeId: z.string(),
           planId: z.string(),
@@ -301,7 +301,7 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
-      case 'get_service_attendance': {
+      case 'pco_get_service_attendance': {
         const schema = z.object({ planId: z.string() });
         const parsed = schema.parse(args);
 
@@ -321,7 +321,7 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
-      case 'analyze_volunteer_scheduling': {
+      case 'pco_analyze_volunteer_scheduling': {
         const schema = z.object({
           serviceTypeId: z.string(),
           weeks: z.number().optional().default(12),
@@ -453,7 +453,7 @@ export async function handleServicesTool(
         ));
       }
 
-      case 'search_songs': {
+      case 'pco_search_songs': {
         const schema = z.object({
           query: z.string(),
           limit: z.number().optional().default(20),
@@ -496,7 +496,7 @@ export async function handleServicesTool(
 export function getServicesToolDefinitions() {
   return [
     {
-      name: 'get_service_types',
+      name: 'pco_get_service_types',
       description:
         'Get all service types configured in Planning Center Services (e.g., "Sunday Morning," "Wednesday Night," "Online Campus"). Call this first when working with services to get the serviceTypeId values needed by other tools.',
       inputSchema: {
@@ -506,7 +506,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'get_upcoming_services',
+      name: 'pco_get_upcoming_services',
       description:
         'Get upcoming service plans within a date range for a specific service type. Returns plan dates, titles, series titles, and key counts. Use get_service_types first to find the serviceTypeId.',
       inputSchema: {
@@ -519,7 +519,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'get_plan_teams',
+      name: 'pco_get_plan_teams',
       description:
         "Get all volunteer teams and their scheduling status for a specific service plan. Shows each team's name and member statuses. Useful for identifying volunteer gaps.",
       inputSchema: {
@@ -531,7 +531,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'get_unfilled_positions',
+      name: 'pco_get_unfilled_positions',
       description:
         'Find volunteer positions in upcoming services that have no one scheduled (status U or D). Returns service dates, team names, and position names so staff can identify gaps.',
       inputSchema: {
@@ -544,7 +544,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'get_plan_items',
+      name: 'pco_get_plan_items',
       description:
         'Get the full service order/rundown for a specific plan — every item in sequence including songs (with title, author, key, arrangement), headers, media, and item notes. Use get_service_types and get_upcoming_services first to find serviceTypeId and planId.',
       inputSchema: {
@@ -557,7 +557,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'get_service_attendance',
+      name: 'pco_get_service_attendance',
       description:
         'Get headcount attendance for a past service plan. Returns plan time data with any available headcount information.',
       inputSchema: {
@@ -569,7 +569,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'analyze_volunteer_scheduling',
+      name: 'pco_analyze_volunteer_scheduling',
       description:
         'Analyze volunteer scheduling patterns over the last N weeks for a service type. Returns: top volunteers by frequency, reliability rates (confirmed vs declined), team fill rates, and chronic decliners. Use for "who are our most reliable volunteers", "which teams are understaffed", or "predict staffing needs" questions.',
       inputSchema: {
@@ -582,7 +582,7 @@ export function getServicesToolDefinitions() {
       },
     },
     {
-      name: 'search_songs',
+      name: 'pco_search_songs',
       description:
         'Search the Planning Center song library by title. Returns matching songs with CCLI number, copyright info, and when each was last scheduled.',
       inputSchema: {

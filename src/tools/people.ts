@@ -12,7 +12,7 @@ export async function handlePeopleTool(
 
   try {
     switch (name) {
-      case 'search_people': {
+      case 'pco_search_people': {
         const schema = z.object({
           query: z.string(),
           limit: z.number().optional().default(20),
@@ -47,7 +47,7 @@ export async function handlePeopleTool(
         }));
       }
 
-      case 'get_person': {
+      case 'pco_get_person': {
         const schema = z.object({ personId: z.string() });
         const parsed = schema.parse(args);
 
@@ -81,7 +81,7 @@ export async function handlePeopleTool(
         ));
       }
 
-      case 'list_saved_lists': {
+      case 'pco_list_saved_lists': {
         const { items, totalCount } = await client.paginate(
           '/people/v2/lists',
           { order: 'name' }
@@ -95,7 +95,7 @@ export async function handlePeopleTool(
         }));
       }
 
-      case 'get_people_by_list': {
+      case 'pco_get_people_by_list': {
         const schema = z.object({ listId: z.string() });
         const parsed = schema.parse(args);
 
@@ -113,7 +113,7 @@ export async function handlePeopleTool(
         }));
       }
 
-      case 'get_people_stats': {
+      case 'pco_get_people_stats': {
         // Use per_page=1 requests to get total_count from meta without fetching all records
         const totalResponse = await client.get<any>('/people/v2/people', { per_page: 1 });
         const totalCount = totalResponse.meta?.total_count ?? 0;
@@ -171,7 +171,7 @@ export async function handlePeopleTool(
         ));
       }
 
-      case 'get_people_by_status': {
+      case 'pco_get_people_by_status': {
         const schema = z.object({
           status: z.enum(['active', 'inactive']),
           limit: z.number().optional().default(50),
@@ -204,7 +204,7 @@ export async function handlePeopleTool(
         }));
       }
 
-      case 'get_people_by_membership': {
+      case 'pco_get_people_by_membership': {
         const schema = z.object({
           membership: z.string(),
           limit: z.number().optional().default(50),
@@ -237,7 +237,7 @@ export async function handlePeopleTool(
         }));
       }
 
-      case 'get_new_people': {
+      case 'pco_get_new_people': {
         const schema = z.object({
           days: z.number().optional().default(30),
           limit: z.number().optional().default(100),
@@ -273,7 +273,7 @@ export async function handlePeopleTool(
         }));
       }
 
-      case 'identify_at_risk_members': {
+      case 'pco_identify_at_risk_members': {
         const schema = z.object({
           inactiveWeeks: z.number().optional().default(6),
           limit: z.number().optional().default(100),
@@ -348,7 +348,7 @@ export async function handlePeopleTool(
         ));
       }
 
-      case 'get_engagement_summary': {
+      case 'pco_get_engagement_summary': {
         // Cross-module summary: people counts, group participation, recent check-in activity
         const results: Record<string, any> = {};
 
@@ -447,7 +447,7 @@ export async function handlePeopleTool(
 export function getPeopleToolDefinitions() {
   return [
     {
-      name: 'search_people',
+      name: 'pco_search_people',
       description:
         'Search for people in Planning Center People by name or email. Returns active people matching the query with contact info. Searches against search_name which matches partial first/last name or email.',
       inputSchema: {
@@ -460,7 +460,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_person',
+      name: 'pco_get_person',
       description:
         'Get the full profile for a specific person by their Planning Center person ID. Includes all emails, phones, addresses, and household data. Use after search_people for complete info.',
       inputSchema: {
@@ -472,7 +472,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'list_saved_lists',
+      name: 'pco_list_saved_lists',
       description:
         'Get all saved people lists in Planning Center. Lists are pre-built segments (e.g., "First Time Guests," "Volunteers"). Returns names and IDs for use with get_people_by_list.',
       inputSchema: {
@@ -482,7 +482,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_people_by_list',
+      name: 'pco_get_people_by_list',
       description:
         'Get all people in a saved Planning Center People list. Use list_saved_lists first to find the listId.',
       inputSchema: {
@@ -494,7 +494,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_people_stats',
+      name: 'pco_get_people_stats',
       description:
         'Get a CRM dashboard overview of your Planning Center people database: total count, breakdown by status (active vs inactive), breakdown by membership type (Member, Regular Attender, Visitor, etc.), and how many were added in the last 30 days. This is the go-to tool for "how many people do we have" and similar questions.',
       inputSchema: {
@@ -504,7 +504,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_people_by_status',
+      name: 'pco_get_people_by_status',
       description:
         'Get people filtered by their PCO status (active or inactive). Returns people sorted by most recently updated. Useful for finding inactive records, cleanup audits, or re-engagement campaigns.',
       inputSchema: {
@@ -517,7 +517,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_people_by_membership',
+      name: 'pco_get_people_by_membership',
       description:
         'Get people filtered by their membership type (e.g., "Member", "Regular Attender", "Visitor"). Returns people sorted by last name. Useful for membership reports and engagement analysis.',
       inputSchema: {
@@ -530,7 +530,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_new_people',
+      name: 'pco_get_new_people',
       description:
         'Find people added to Planning Center in the last N days, ordered by most recent first. Useful for tracking new guest/visitor volume.',
       inputSchema: {
@@ -543,7 +543,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'identify_at_risk_members',
+      name: 'pco_identify_at_risk_members',
       description:
         'Find active people who have NOT checked in within the last N weeks. These are "at-risk" members who may be disengaging. Cross-references check-in data with the people database. Use for pastoral care follow-up, re-engagement campaigns, or data health checks.',
       inputSchema: {
@@ -556,7 +556,7 @@ export function getPeopleToolDefinitions() {
       },
     },
     {
-      name: 'get_engagement_summary',
+      name: 'pco_get_engagement_summary',
       description:
         'Cross-module church health dashboard: total people (active vs inactive), group count, check-ins last 7 days, first-time visitors last 30 days, new people added last 30 days, and upcoming registration events. One tool call that gives a full pulse on your church. Use this for "give me an overview" or "how are we doing" questions.',
       inputSchema: {
