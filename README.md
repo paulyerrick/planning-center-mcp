@@ -27,6 +27,21 @@ cp .env.example .env
 npm run build
 ```
 
+If you already have mcps installed, copy paste this
+
+```bash
+ },
+    "planning-center": {
+      "command": "node",
+      "args": [
+        "/Users/paulyerrick/planning-center-mcp/dist/index.js"
+      ],
+      "env": {
+        "PCO_APP_ID": "your_app_id_here",
+        "PCO_SECRET": "your_secret_here"
+      }
+```bash
+
 ## Test the Connection
 
 ```bash
