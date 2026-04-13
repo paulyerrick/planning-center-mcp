@@ -42,8 +42,9 @@ If you already have mcps installed, copy paste this
       }
 ```bash
 
-## Test the Connection
 
+## Test the Connection
+Then, in the terminal, run this (cd planning-center-mcp)
 ```bash
 npm run test:connection
 ```
