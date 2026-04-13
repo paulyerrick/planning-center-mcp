@@ -40,8 +40,7 @@ If you already have mcps installed, copy paste this
         "PCO_APP_ID": "your_app_id_here",
         "PCO_SECRET": "your_secret_here"
       }
-```bash
-
+```
 
 ## Test the Connection
 Then, in the terminal, run this (cd planning-center-mcp)
