@@ -4,21 +4,23 @@ import { JsonApiRecord, JsonApiResponse } from './types.js';
 /** Planning Center API client with pagination, rate-limit retry, and JSON:API flattening */
 export class PlanningCenterClient {
   private http: AxiosInstance;
-  private baseUrl = 'https://api.planningcenteronline.com';
+  private baseUrl: string;
 
-  constructor(appId: string, secret: string) {
+  constructor(appId: string, secret: string, baseUrl = process.env.PCO_BASE_URL ?? 'https://api.planningcenteronline.com') {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
     const auth = Buffer.from(`${appId}:${secret}`).toString('base64');
     this.http = axios.create({
       baseURL: this.baseUrl,
       headers: {
         Authorization: `Basic ${auth}`,
         'Content-Type': 'application/json',
+        'User-Agent': 'planning-center-mcp/1.0',
       },
       timeout: 30_000,
     });
   }
 
-  /** Single GET request with optional rate-limit retry */
+  /** Single GET request with retry/backoff for transient PCO failures and rate limits */
   async get<T = JsonApiResponse>(
     path: string,
     params?: Record<string, string | number | undefined>
@@ -27,23 +29,36 @@ export class PlanningCenterClient {
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );
     const start = Date.now();
-    try {
-      const response = await this.http.get<T>(path, { params: cleanParams });
-      if (process.env.DEBUG) {
-        console.error(`[PCO] GET ${path} (${Date.now() - start}ms)`);
-      }
-      return response.data;
-    } catch (err) {
-      if (err instanceof AxiosError && err.response?.status === 429) {
-        if (process.env.DEBUG) {
-          console.error(`[PCO] Rate limited on ${path}, waiting 10s...`);
-        }
-        await this.sleep(10_000);
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
         const response = await this.http.get<T>(path, { params: cleanParams });
+        if (process.env.DEBUG) {
+          console.error(`[PCO] GET ${path} attempt=${attempt} (${Date.now() - start}ms)`);
+        }
         return response.data;
+      } catch (err) {
+        const status = err instanceof AxiosError ? err.response?.status : undefined;
+        const retryable = status === 429 || status === 502 || status === 503 || status === 504;
+        if (!retryable || attempt === maxAttempts) {
+          throw err;
+        }
+
+        const retryAfter = err instanceof AxiosError ? err.response?.headers?.['retry-after'] : undefined;
+        const retryAfterMs = typeof retryAfter === 'string' && /^\d+$/.test(retryAfter)
+          ? Number(retryAfter) * 1000
+          : undefined;
+        const backoffMs = retryAfterMs ?? Math.min(10_000, 1000 * 2 ** (attempt - 1));
+
+        if (process.env.DEBUG) {
+          console.error(`[PCO] Retryable HTTP ${status} on ${path}; retrying in ${backoffMs}ms`);
+        }
+        await this.sleep(backoffMs);
       }
-      throw err;
     }
+
+    throw new Error(`Request failed after ${maxAttempts} attempts: ${path}`);
   }
 
   /** Auto-paginating GET — fetches up to maxPages pages of per_page=100 */

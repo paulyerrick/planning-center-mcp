@@ -36,9 +36,10 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
       inputSchema: {
         type: 'object' as const,
         properties: {
+          serviceTypeId: { type: 'string', description: 'The service type ID (from get_service_types)' },
           planId: { type: 'string', description: 'The plan ID' },
         },
-        required: ['planId'],
+        required: ['serviceTypeId', 'planId'],
       },
     },
     {
@@ -57,13 +58,14 @@ export function registerServicesTools(server: Server, client: PlanningCenterClie
     {
       name: 'pco_get_service_attendance',
       description:
-        'Get headcount attendance for a past service plan. Returns total headcount and breakdown by attendance type if available. Use planId from get_upcoming_services or search.',
+        'Get headcount attendance for a past service plan. Returns total headcount and breakdown by attendance type if available. Use serviceTypeId and planId from get_upcoming_services.',
       inputSchema: {
         type: 'object' as const,
         properties: {
+          serviceTypeId: { type: 'string', description: 'The service type ID (from get_service_types)' },
           planId: { type: 'string', description: 'The plan ID' },
         },
-        required: ['planId'],
+        required: ['serviceTypeId', 'planId'],
       },
     },
     {
@@ -141,22 +143,11 @@ export async function handleServicesTool(
       }
 
       case 'pco_get_plan_teams': {
-        const schema = z.object({ planId: z.string() });
+        const schema = z.object({ serviceTypeId: z.string(), planId: z.string() });
         const parsed = schema.parse(args);
 
-        const endpoint = `/services/v2/service_types/0/plans/${parsed.planId}/team_members`;
-        // First get teams for the plan
-        // PCO plan teams endpoint: we need to go through the plan's teams
-        // Actually, team members are under the plan
-        const teamsEndpoint = `/services/v2/service_types/0/plans/${parsed.planId}/team_members`;
-
-        // Get plan's teams first via the neededPositions or team approach
-        // Plans belong to service_types, so we need to find the plan differently
-        // The safer approach: use the plan's team_members endpoint
-        const response = await client.get<any>(
-          `/services/v2/plans/${parsed.planId}/team_members`,
-          { per_page: 100 }
-        );
+        const endpoint = `/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/team_members`;
+        const response = await client.get<any>(endpoint, { per_page: 100 });
 
         const members = Array.isArray(response.data)
           ? response.data.map((r: any) => client.flatten(r))
@@ -179,7 +170,7 @@ export async function handleServicesTool(
           { members, teamSummary: Object.values(teams) },
           {
             count: members.length,
-            pcoEndpoint: `/services/v2/plans/${parsed.planId}/team_members`,
+            pcoEndpoint: endpoint,
             executionMs: Date.now() - start,
           }
         );
@@ -302,12 +293,11 @@ export async function handleServicesTool(
       }
 
       case 'pco_get_service_attendance': {
-        const schema = z.object({ planId: z.string() });
+        const schema = z.object({ serviceTypeId: z.string(), planId: z.string() });
         const parsed = schema.parse(args);
 
-        const response = await client.get<any>(
-          `/services/v2/plans/${parsed.planId}/plan_times`
-        );
+        const endpoint = `/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/plan_times`;
+        const response = await client.get<any>(endpoint);
 
         const planTimes = Array.isArray(response.data)
           ? response.data.map((r: any) => client.flatten(r))
@@ -315,7 +305,7 @@ export async function handleServicesTool(
 
         const result = toolSuccess(planTimes, {
           count: planTimes.length,
-          pcoEndpoint: `/services/v2/plans/${parsed.planId}/plan_times`,
+          pcoEndpoint: endpoint,
           executionMs: Date.now() - start,
         });
         return JSON.stringify(result);
@@ -521,13 +511,14 @@ export function getServicesToolDefinitions() {
     {
       name: 'pco_get_plan_teams',
       description:
-        "Get all volunteer teams and their scheduling status for a specific service plan. Shows each team's name and member statuses. Useful for identifying volunteer gaps.",
+        "Get all volunteer teams and their scheduling status for a specific service plan. Shows each team's name and member statuses. Useful for identifying volunteer gaps. Use get_service_types and get_upcoming_services first to find serviceTypeId and planId.",
       inputSchema: {
         type: 'object' as const,
         properties: {
-          planId: { type: 'string', description: 'The plan ID' },
+          serviceTypeId: { type: 'string', description: 'The service type ID (from get_service_types)' },
+          planId: { type: 'string', description: 'The plan ID (from get_upcoming_services)' },
         },
-        required: ['planId'],
+        required: ['serviceTypeId', 'planId'],
       },
     },
     {
@@ -559,13 +550,14 @@ export function getServicesToolDefinitions() {
     {
       name: 'pco_get_service_attendance',
       description:
-        'Get headcount attendance for a past service plan. Returns plan time data with any available headcount information.',
+        'Get headcount attendance for a past service plan. Returns plan time data with any available headcount information. Use get_service_types and get_upcoming_services first to find serviceTypeId and planId.',
       inputSchema: {
         type: 'object' as const,
         properties: {
+          serviceTypeId: { type: 'string', description: 'The service type ID (from get_service_types)' },
           planId: { type: 'string', description: 'The plan ID' },
         },
-        required: ['planId'],
+        required: ['serviceTypeId', 'planId'],
       },
     },
     {

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -15,6 +16,7 @@ import { getRegistrationsToolDefinitions, handleRegistrationsTool } from './tool
 import { getCheckInsToolDefinitions, handleCheckInsTool } from './tools/checkins.js';
 import { getGivingToolDefinitions, handleGivingTool } from './tools/giving.js';
 import { getAnalyticsToolDefinitions, handleAnalyticsTool } from './tools/analytics.js';
+import { getWorkflowToolDefinitions, handleWorkflowTool } from './tools/workflows.js';
 import { PCO_CONTEXT_PROMPT, PCO_CONTEXT_CONTENT } from './prompts/pco-context.js';
 
 dotenv.config();
@@ -47,6 +49,7 @@ const allTools = [
   ...getCheckInsToolDefinitions(),
   ...getGivingToolDefinitions(),
   ...getAnalyticsToolDefinitions(),
+  ...getWorkflowToolDefinitions(),
 ];
 
 // Map tool names to their module handlers
@@ -57,6 +60,7 @@ const registrationsTools = new Set(getRegistrationsToolDefinitions().map((t) => 
 const checkInsTools = new Set(getCheckInsToolDefinitions().map((t) => t.name));
 const givingTools = new Set(getGivingToolDefinitions().map((t) => t.name));
 const analyticsTools = new Set(getAnalyticsToolDefinitions().map((t) => t.name));
+const workflowTools = new Set(getWorkflowToolDefinitions().map((t) => t.name));
 
 // Register tools/list handler
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -83,6 +87,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     result = await handleGivingTool(name, args as Record<string, unknown>, client);
   } else if (analyticsTools.has(name)) {
     result = await handleAnalyticsTool(name, args as Record<string, unknown>, client);
+  } else if (workflowTools.has(name)) {
+    result = await handleWorkflowTool(name, args as Record<string, unknown>, client);
   } else {
     result = JSON.stringify({
       success: false,

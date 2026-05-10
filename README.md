@@ -5,6 +5,7 @@ The first Model Context Protocol (MCP) server for Planning Center Online. It let
 ## Prerequisites
 
 - **Node.js 20+**
+- **pnpm 11+**
 - An active **Planning Center Online** account
 - A **Personal Access Token** (Application ID + Secret)
 
@@ -18,34 +19,36 @@ The first Model Context Protocol (MCP) server for Planning Center Online. It let
 
 ## Installation
 
+For non-developer setup, start with [INSTALL.md](./INSTALL.md).
+
 ```bash
 git clone https://github.com/your-org/planning-center-mcp.git
 cd planning-center-mcp
-npm install
+pnpm install
 cp .env.example .env
 # Edit .env with your PCO_APP_ID and PCO_SECRET
-npm run build
+pnpm run build
 ```
 
-If you already have mcps installed, copy paste this
+If you already have MCPs installed, add this server block to your Claude Desktop config:
 
-```bash
- },
-    "planning-center": {
-      "command": "node",
-      "args": [
-        "/Users/paulyerrick/planning-center-mcp/dist/index.js"
-      ],
-      "env": {
-        "PCO_APP_ID": "your_app_id_here",
-        "PCO_SECRET": "your_secret_here"
-      }
+```json
+"planning-center": {
+  "command": "node",
+  "args": ["/absolute/path/to/planning-center-mcp/dist/index.js"],
+  "env": {
+    "PCO_APP_ID": "your_app_id_here",
+    "PCO_SECRET": "your_secret_here"
+  }
+}
 ```
 
 ## Test the Connection
-Then, in the terminal, run this (cd planning-center-mcp)
+
+Then, in the terminal, run this from the project directory:
+
 ```bash
-npm run test:connection
+pnpm run test:connection
 ```
 
 This verifies your credentials and checks access to each PCO module.
@@ -81,29 +84,39 @@ Set environment variables in your shell or `.env` file before launching.
 
 | Tool | Module | Description |
 |---|---|---|
-| `get_service_types` | Services | List all service types |
-| `get_upcoming_services` | Services | Upcoming plans for a service type |
-| `get_plan_teams` | Services | Team scheduling status for a plan |
-| `get_unfilled_positions` | Services | Unfilled volunteer slots in upcoming services |
-| `get_service_attendance` | Services | Headcount for a past service |
-| `search_songs` | Services | Search the song library |
-| `search_people` | People | Search for people by name or email |
-| `get_person` | People | Full profile for a specific person |
-| `list_saved_lists` | People | All saved people lists |
-| `get_people_by_list` | People | Everyone in a saved list |
-| `get_new_people` | People | People added in the last N days |
-| `get_group_types` | Groups | All group types |
-| `list_groups` | Groups | Active groups with member counts |
-| `get_group_members` | Groups | Members of a specific group |
-| `get_groups_without_leader` | Groups | Groups with no leader assigned |
-| `get_upcoming_group_events` | Groups | Upcoming group events |
-| `list_events` | Registrations | Upcoming registration events |
-| `get_event_registrations` | Registrations | All registrants for an event |
-| `get_registration_summary` | Registrations | Counts and capacity for an event |
-| `get_checkin_events` | Check-Ins | All check-in events |
-| `get_attendance_summary` | Check-Ins | Headcount for a date range |
-| `get_first_time_visitors` | Check-Ins | First-time check-ins in a date range |
-| `get_check_in_trend` | Check-Ins | Week-by-week headcount trend |
+| `pco_get_service_types` | Services | List all service types |
+| `pco_get_upcoming_services` | Services | Upcoming plans for a service type |
+| `pco_get_plan_teams` | Services | Team scheduling status for a plan |
+| `pco_get_unfilled_positions` | Services | Unfilled volunteer slots in upcoming services |
+| `pco_get_service_attendance` | Services | Headcount for a past service |
+| `pco_search_songs` | Services | Search the song library |
+| `pco_search_people` | People | Search for people by name or email |
+| `pco_get_person` | People | Full profile for a specific person |
+| `pco_list_saved_lists` | People | All saved people lists |
+| `pco_get_people_by_list` | People | Everyone in a saved list |
+| `pco_get_new_people` | People | People added in the last N days |
+| `pco_get_group_types` | Groups | All group types |
+| `pco_list_groups` | Groups | Active groups with member counts |
+| `pco_get_group_members` | Groups | Members of a specific group |
+| `pco_get_groups_without_leader` | Groups | Groups with no leader assigned |
+| `pco_get_upcoming_group_events` | Groups | Upcoming group events |
+| `pco_list_events` | Registrations | Upcoming registration events |
+| `pco_get_event_registrations` | Registrations | All registrants for an event |
+| `pco_get_registration_summary` | Registrations | Counts and capacity for an event |
+| `pco_get_checkin_events` | Check-Ins | All check-in events |
+| `pco_get_attendance_summary` | Check-Ins | Headcount for a date range |
+| `pco_get_first_time_visitors` | Check-Ins | First-time check-ins in a date range |
+| `pco_get_check_in_trend` | Check-Ins | Week-by-week headcount trend |
+| `pco_get_giving_summary` | Giving | Giving totals and payment method breakdown |
+| `pco_get_donations` | Giving | Donations with optional date filters |
+| `pco_get_funds` | Giving | Giving funds |
+| `pco_get_giving_trends` | Giving | Week-by-week giving trends |
+| `pco_correlate_giving_attendance` | Analytics | Cross-module giving and attendance overlap |
+| `pco_correlate_groups_attendance` | Analytics | Cross-module groups and attendance overlap |
+| `pco_weekend_readiness` | Workflows | One-shot readiness report for upcoming services and volunteer gaps |
+| `pco_guest_followup` | Workflows | First-time guest follow-up and return-visit detection |
+| `pco_ministry_health_summary` | Workflows | Executive health summary across People, Check-Ins, Giving, and Groups |
+| `pco_connection_status` | Workflows | Verifies PCO credentials and module access after install |
 
 ## Module Access Required
 
@@ -120,10 +133,11 @@ If a module isn't enabled, the tool will return a clear error message.
 ## Development
 
 ```bash
-npm run dev          # Watch mode with tsx
-npm run typecheck    # Type check without building
-npm run build        # Build to dist/
-npm start            # Run the built server
+pnpm run dev          # Watch mode with tsx
+pnpm run typecheck    # Type check without building
+pnpm run build        # Build to dist/
+pnpm test             # Build and run Playwright MCP stdio tests
+pnpm start            # Run the built server
 ```
 
 ## License
