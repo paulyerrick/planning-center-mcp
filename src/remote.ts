@@ -1,0 +1,306 @@
+#!/usr/bin/env node
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import axios from 'axios';
+import crypto from 'node:crypto';
+import http, { IncomingMessage, ServerResponse } from 'node:http';
+import { URL } from 'node:url';
+import dotenv from 'dotenv';
+import { PlanningCenterClient } from './client.js';
+import { createPlanningCenterMcpServer } from './mcp.js';
+
+dotenv.config();
+
+const PORT = Number(process.env.PORT ?? 3000);
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT}`).replace(/\/$/, '');
+const PCO_AUTHORIZE_URL = 'https://api.planningcenteronline.com/oauth/authorize';
+const PCO_TOKEN_URL = 'https://api.planningcenteronline.com/oauth/token';
+
+type PcoConnectionRow = {
+  id: string;
+  encrypted_access_token: string;
+  encrypted_refresh_token: string | null;
+  expires_at: string | null;
+};
+
+type TokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  token_type?: string;
+};
+
+function requiredEnv(name: string) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+
+function getSupabase(): SupabaseClient {
+  return createClient(requiredEnv('SUPABASE_URL'), requiredEnv('SUPABASE_SERVICE_ROLE_KEY'), {
+    auth: { persistSession: false },
+  });
+}
+
+function encryptionKey() {
+  return crypto.createHash('sha256').update(requiredEnv('TOKEN_ENCRYPTION_KEY')).digest();
+}
+
+function encrypt(value: string) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+function decrypt(value: string) {
+  const [ivRaw, tagRaw, encryptedRaw] = value.split('.');
+  if (!ivRaw || !tagRaw || !encryptedRaw) throw new Error('Invalid encrypted token format');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivRaw, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedRaw, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+function hashToken(token: string) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function generateConnectorToken() {
+  return `pco_${crypto.randomBytes(32).toString('base64url')}`;
+}
+
+function signState(payload: string) {
+  return crypto.createHmac('sha256', requiredEnv('OAUTH_STATE_SECRET')).update(payload).digest('base64url');
+}
+
+function createState() {
+  const payload = JSON.stringify({ nonce: crypto.randomBytes(16).toString('base64url'), ts: Date.now() });
+  const encoded = Buffer.from(payload).toString('base64url');
+  return `${encoded}.${signState(encoded)}`;
+}
+
+function verifyState(state: string | null) {
+  if (!state) return false;
+  const [encoded, signature] = state.split('.');
+  if (!encoded || !signature) return false;
+  const expected = signState(encoded);
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return false;
+  const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as { ts: number };
+  return Date.now() - parsed.ts < 15 * 60_000;
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept, Mcp-Session-Id, Last-Event-ID',
+  });
+  res.end(JSON.stringify(body));
+}
+
+function sendHtml(res: ServerResponse, status: number, html: string) {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(html);
+}
+
+async function exchangeCodeForToken(code: string): Promise<TokenResponse> {
+  const response = await axios.post<TokenResponse>(PCO_TOKEN_URL, new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: requiredEnv('PCO_REDIRECT_URI'),
+    client_id: requiredEnv('PCO_CLIENT_ID'),
+    client_secret: requiredEnv('PCO_CLIENT_SECRET'),
+  }).toString(), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+  return response.data;
+}
+
+async function refreshAccessToken(connection: PcoConnectionRow): Promise<string> {
+  if (!connection.encrypted_refresh_token) return decrypt(connection.encrypted_access_token);
+  if (connection.expires_at && new Date(connection.expires_at).getTime() > Date.now() + 60_000) {
+    return decrypt(connection.encrypted_access_token);
+  }
+
+  const refreshToken = decrypt(connection.encrypted_refresh_token);
+  const response = await axios.post<TokenResponse>(PCO_TOKEN_URL, new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: requiredEnv('PCO_CLIENT_ID'),
+    client_secret: requiredEnv('PCO_CLIENT_SECRET'),
+  }).toString(), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+
+  const token = response.data;
+  const expiresAt = token.expires_in
+    ? new Date(Date.now() + token.expires_in * 1000).toISOString()
+    : null;
+
+  await getSupabase()
+    .from('pco_connections')
+    .update({
+      encrypted_access_token: encrypt(token.access_token),
+      encrypted_refresh_token: token.refresh_token ? encrypt(token.refresh_token) : connection.encrypted_refresh_token,
+      expires_at: expiresAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', connection.id);
+
+  return token.access_token;
+}
+
+async function connectionForConnectorToken(rawToken: string) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('connector_tokens')
+    .select('pco_connection_id, revoked_at, pco_connections(id, encrypted_access_token, encrypted_refresh_token, expires_at)')
+    .eq('token_hash', hashToken(rawToken))
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data || data.revoked_at) return null;
+  const connection = Array.isArray(data.pco_connections)
+    ? data.pco_connections[0]
+    : data.pco_connections;
+  return connection as PcoConnectionRow | null;
+}
+
+async function handleOAuthStart(_req: IncomingMessage, res: ServerResponse) {
+  const state = createState();
+  const url = new URL(PCO_AUTHORIZE_URL);
+  url.searchParams.set('client_id', requiredEnv('PCO_CLIENT_ID'));
+  url.searchParams.set('redirect_uri', requiredEnv('PCO_REDIRECT_URI'));
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('state', state);
+  res.writeHead(302, { Location: url.toString() });
+  res.end();
+}
+
+async function handleOAuthCallback(url: URL, res: ServerResponse) {
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  if (!code || !verifyState(state)) {
+    sendHtml(res, 400, '<h1>Planning Center connection failed</h1><p>Missing code or invalid state.</p>');
+    return;
+  }
+
+  const token = await exchangeCodeForToken(code);
+  const pcoClient = PlanningCenterClient.withAccessToken(token.access_token);
+  const me = await pcoClient.get<any>('/people/v2/me');
+  const person = pcoClient.flatten(me.data);
+  const connectorToken = generateConnectorToken();
+  const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null;
+  const supabase = getSupabase();
+
+  const { data: connection, error: connectionError } = await supabase
+    .from('pco_connections')
+    .insert({
+      pco_person_id: person.id,
+      pco_person_name: person.name ?? null,
+      encrypted_access_token: encrypt(token.access_token),
+      encrypted_refresh_token: token.refresh_token ? encrypt(token.refresh_token) : null,
+      expires_at: expiresAt,
+    })
+    .select('id')
+    .single();
+
+  if (connectionError) throw connectionError;
+
+  const { error: tokenError } = await supabase.from('connector_tokens').insert({
+    pco_connection_id: connection.id,
+    token_hash: hashToken(connectorToken),
+    name: `Claude connector for ${person.name ?? person.id}`,
+  });
+
+  if (tokenError) throw tokenError;
+
+  const mcpUrl = `${PUBLIC_BASE_URL}/mcp/${connectorToken}`;
+  sendHtml(res, 200, `<!doctype html>
+<html><head><title>Planning Center Connected</title></head>
+<body style="font-family: system-ui; max-width: 760px; margin: 40px auto; line-height: 1.5;">
+  <h1>Planning Center connected</h1>
+  <p>Connected as <strong>${person.name ?? person.id}</strong>.</p>
+  <p>Copy this Remote MCP server URL into Claude → Settings → Connectors → Add custom connector:</p>
+  <pre style="background:#f5f5f5;padding:16px;white-space:pre-wrap;word-break:break-all;">${mcpUrl}</pre>
+  <p><strong>Security:</strong> treat this URL like a password. Anyone with it can use this connector until revoked.</p>
+</body></html>`);
+}
+
+async function handleMcp(req: IncomingMessage, res: ServerResponse, connectorToken: string) {
+  const connection = await connectionForConnectorToken(connectorToken);
+  if (!connection) {
+    sendJson(res, 401, { error: 'Invalid or revoked connector token' });
+    return;
+  }
+
+  const accessToken = await refreshAccessToken(connection);
+  const pcoClient = PlanningCenterClient.withAccessToken(accessToken);
+  const mcpServer = createPlanningCenterMcpServer(pcoClient);
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+
+  res.on('finish', () => {
+    void mcpServer.close().catch((err) => console.error('Error closing MCP server:', err));
+  });
+
+  await mcpServer.connect(transport);
+  await transport.handleRequest(req, res);
+}
+
+async function route(req: IncomingMessage, res: ServerResponse) {
+  try {
+    if (req.method === 'OPTIONS') {
+      sendJson(res, 204, null);
+      return;
+    }
+
+    const url = new URL(req.url ?? '/', PUBLIC_BASE_URL);
+
+    if (url.pathname === '/health') {
+      sendJson(res, 200, { ok: true, name: 'planning-center-mcp-remote' });
+      return;
+    }
+
+    if (url.pathname === '/' || url.pathname === '/setup') {
+      sendHtml(res, 200, `<!doctype html><html><body style="font-family: system-ui; max-width: 760px; margin: 40px auto; line-height: 1.5;">
+        <h1>Planning Center MCP</h1>
+        <p>Connect Planning Center to Claude with a remote MCP connector.</p>
+        <p><a href="/connect/planning-center">Connect Planning Center</a></p>
+      </body></html>`);
+      return;
+    }
+
+    if (url.pathname === '/connect/planning-center') {
+      await handleOAuthStart(req, res);
+      return;
+    }
+
+    if (url.pathname === '/oauth/planning-center/callback') {
+      await handleOAuthCallback(url, res);
+      return;
+    }
+
+    const mcpMatch = url.pathname.match(/^\/mcp\/([^/]+)$/);
+    if (mcpMatch && ['GET', 'POST', 'DELETE'].includes(req.method ?? '')) {
+      await handleMcp(req, res, mcpMatch[1]);
+      return;
+    }
+
+    sendJson(res, 404, { error: 'Not found' });
+  } catch (err) {
+    console.error('Remote MCP error:', err);
+    sendJson(res, 500, { error: err instanceof Error ? err.message : 'Internal server error' });
+  }
+}
+
+http.createServer((req, res) => void route(req, res)).listen(PORT, () => {
+  console.error(`Planning Center remote MCP listening on ${PUBLIC_BASE_URL}`);
+});

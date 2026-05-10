@@ -10,8 +10,10 @@
     "dist",
     "README.md",
     "INSTALL.md",
+    "REMOTE_DEPLOY.md",
     "RELEASE_NOTES.md",
-    "TODO.md"
+    "TODO.md",
+    "supabase/schema.sql"
   ],
   "type": "module",
   "packageManager": "pnpm@11.0.9",
@@ -19,7 +21,9 @@
     "build": "tsc",
     "prepack": "pnpm run build",
     "dev": "tsx watch src/index.ts",
+    "dev:remote": "tsx watch src/remote.ts",
     "start": "node dist/index.js",
+    "start:remote": "node dist/remote.js",
     "typecheck": "tsc --noEmit",
     "test": "pnpm run build && playwright test",
     "test:e2e": "playwright test",
@@ -35,6 +39,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@supabase/supabase-js": "^2.105.4",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "zod": "^3.24.2"

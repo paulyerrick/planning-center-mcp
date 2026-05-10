@@ -20,6 +20,21 @@ export class PlanningCenterClient {
     });
   }
 
+  static withAccessToken(accessToken: string, baseUrl = process.env.PCO_BASE_URL ?? 'https://api.planningcenteronline.com') {
+    const client = Object.create(PlanningCenterClient.prototype) as PlanningCenterClient;
+    client.baseUrl = baseUrl.replace(/\/$/, '');
+    client.http = axios.create({
+      baseURL: client.baseUrl,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'planning-center-mcp/1.0',
+      },
+      timeout: 30_000,
+    });
+    return client;
+  }
+
   /** Single GET request with retry/backoff for transient PCO failures and rate limits */
   async get<T = JsonApiResponse>(
     path: string,
