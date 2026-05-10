@@ -74,7 +74,7 @@ Name: pco-mcp
 Environment: Node
 Region: closest to you
 Branch: main
-Build Command: pnpm install --frozen-lockfile && pnpm run build
+Build Command: corepack enable && pnpm install --frozen-lockfile && pnpm run build
 Start Command: pnpm run start:remote
 ```
 
