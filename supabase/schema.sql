@@ -43,3 +43,10 @@ create index if not exists mcp_audit_logs_connection_idx on public.mcp_audit_log
 alter table public.pco_connections enable row level security;
 alter table public.connector_tokens enable row level security;
 alter table public.mcp_audit_logs enable row level security;
+
+-- Explicit grants for the Supabase service role used by the Render server.
+-- RLS protects anon/authenticated clients; service_role is server-only and bypasses RLS.
+grant usage on schema public to service_role;
+grant select, insert, update, delete on public.pco_connections to service_role;
+grant select, insert, update, delete on public.connector_tokens to service_role;
+grant select, insert, update, delete on public.mcp_audit_logs to service_role;
