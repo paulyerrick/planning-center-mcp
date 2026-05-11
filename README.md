@@ -1,15 +1,34 @@
 # Planning Center MCP Server
 
-The first Model Context Protocol (MCP) server for Planning Center Online. It lets Claude (or any MCP-compatible AI) work directly with your church's PCO data — searching people, reviewing service schedules, checking volunteer gaps, tracking attendance, and more. Deploy it by setting two environment variables.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![MCP Compatible](https://img.shields.io/badge/MCP-compatible-blue)
+![Version](https://img.shields.io/badge/version-1.0.0-green)
+![Node.js](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen)
 
-## Prerequisites
+The first Model Context Protocol (MCP) server for Planning Center Online. It lets Claude (or any MCP-compatible AI) work directly with your church's PCO data — searching people, reviewing service schedules, checking volunteer gaps, tracking attendance, and more.
 
-- **Node.js 20+**
+## Quick Start
+
+**Recommended: Use the hosted server**
+
+The easiest way to use this MCP is via the hosted server — no installation, no credentials to manage locally.
+
+https://pco-mcp.cokistudio.com/connect/planning-center
+
+**Or self-host**
+
+If you'd prefer to run your own instance, see the [Self-Hosting](#self-hosting) section below.
+
+## Self-Hosting
+
+### Prerequisites
+
+- **Node.js 22.13+**
 - **pnpm 11+**
 - An active **Planning Center Online** account
 - A **Personal Access Token** (Application ID + Secret)
 
-## Getting a Planning Center Personal Access Token
+### Getting a Planning Center Personal Access Token
 
 1. Log in at [api.planningcenteronline.com/oauth/applications](https://api.planningcenteronline.com/oauth/applications)
 2. Click **New Personal Access Token**
@@ -17,7 +36,7 @@ The first Model Context Protocol (MCP) server for Planning Center Online. It let
 4. Select the apps: **Services, People, Groups, Registrations, Check-Ins**
 5. Copy the **Application ID** and **Secret** — store them safely
 
-## Installation
+### Installation
 
 For non-developer setup, start with [INSTALL.md](./INSTALL.md).
 
@@ -43,7 +62,7 @@ If you already have MCPs installed, add this server block to your Claude Desktop
 }
 ```
 
-## Test the Connection
+### Test the Connection
 
 Then, in the terminal, run this from the project directory:
 
@@ -53,7 +72,7 @@ pnpm run test:connection
 
 This verifies your credentials and checks access to each PCO module.
 
-## Add to Claude Desktop
+### Add to Claude Desktop
 
 Add to your `claude_desktop_config.json`:
 
@@ -72,7 +91,7 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-## Add to Claude Code
+### Add to Claude Code
 
 ```bash
 claude mcp add planning-center -- node /absolute/path/to/planning-center-mcp/dist/index.js
@@ -144,6 +163,15 @@ pnpm test             # Build and run Playwright MCP stdio tests
 pnpm start            # Run the built server
 ```
 
+## About
+
+Built and maintained by Paul Yerrick / COKI Studio LLC.
+
+This is an independent, community-built MCP server for Planning Center Online — not officially affiliated with or endorsed by Planning Center.
+
+- Website: cokistudio.com
+- Author: Paul Yerrick
+
 ## License
 
-MIT
+Released under the MIT License. See [LICENSE](LICENSE) for details.
