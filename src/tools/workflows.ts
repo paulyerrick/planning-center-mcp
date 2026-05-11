@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { PlanningCenterClient } from '../client.js';
 import { toolSuccess, toolError } from '../response.js';
+import { DisabledFeedbackStore, type FeedbackStore } from '../feedback.js';
 import { JsonApiRecord, JsonApiResponse } from '../types.js';
+
+export type WorkflowContext = {
+  connectionId?: string;
+  feedbackStore?: FeedbackStore;
+};
 
 type ReadinessPlan = {
   planId: string;
@@ -72,9 +78,11 @@ async function paginateRaw(
 export async function handleWorkflowTool(
   name: string,
   args: Record<string, unknown>,
-  client: PlanningCenterClient
+  client: PlanningCenterClient,
+  context: WorkflowContext = {}
 ): Promise<string> {
   const start = Date.now();
+  const feedbackStore = context.feedbackStore ?? new DisabledFeedbackStore();
 
   try {
     switch (name) {
@@ -539,6 +547,243 @@ export async function handleWorkflowTool(
         ));
       }
 
+      case 'pco_dashboard_snapshot': {
+        const schema = z.object({
+          startDate: z.string(),
+          endDate: z.string(),
+          checkInsEventId: z.string().optional(),
+          serviceTypeId: z.string().optional(),
+          weeks: z.number().min(1).max(52).optional().default(12),
+        });
+        const parsed = schema.parse(args);
+        const warnings: Array<{ source: string; message: string }> = [];
+
+        const charts: Array<Record<string, unknown>> = [];
+        const tables: Array<Record<string, unknown>> = [];
+        const insights: string[] = [];
+
+        if (parsed.checkInsEventId) {
+          try {
+            const start = new Date();
+            start.setUTCDate(start.getUTCDate() - parsed.weeks * 7);
+            const { items: periods } = await client.paginate(
+              `/check-ins/v2/events/${parsed.checkInsEventId}/event_periods`,
+              { 'where[starts_at][gte]': start.toISOString(), order: 'starts_at' },
+              10
+            );
+            const attendanceData = periods.map((period: any) => ({
+              label: String(period.starts_at ?? '').slice(0, 10),
+              value: Number(period.regular_count ?? 0) + Number(period.guest_count ?? 0) + Number(period.volunteer_count ?? 0),
+            }));
+            charts.push({
+              type: 'line',
+              title: 'Attendance trend',
+              xAxis: 'Date',
+              yAxis: 'Headcount',
+              series: [{ name: 'Total attendance', data: attendanceData }],
+            });
+            if (attendanceData.length >= 2) {
+              const first = attendanceData[0].value;
+              const last = attendanceData[attendanceData.length - 1].value;
+              insights.push(`Attendance moved from ${first} to ${last} over the analyzed window.`);
+            }
+          } catch (err) {
+            warnings.push({ source: 'Check-Ins', message: PlanningCenterClient.formatError(err, 'Check-Ins') });
+          }
+        }
+
+        try {
+          const { items: donations } = await client.paginate('/giving/v2/donations', {
+            'where[received_at][gte]': parsed.startDate,
+            'where[received_at][lte]': parsed.endDate,
+            order: 'received_at',
+            per_page: 100,
+          }, 10);
+          const givingByDay = new Map<string, number>();
+          for (const donation of donations) {
+            const day = String((donation as any).received_at ?? '').slice(0, 10);
+            if (!day) continue;
+            givingByDay.set(day, (givingByDay.get(day) ?? 0) + Number((donation as any).amount_cents ?? 0) / 100);
+          }
+          charts.push({
+            type: 'line',
+            title: 'Giving trend',
+            xAxis: 'Date',
+            yAxis: 'Dollars',
+            series: [{
+              name: 'Giving',
+              data: Array.from(givingByDay.entries()).map(([label, value]) => ({ label, value: Math.round(value * 100) / 100 })),
+            }],
+          });
+        } catch (err) {
+          warnings.push({ source: 'Giving', message: PlanningCenterClient.formatError(err, 'Giving') });
+        }
+
+        if (parsed.serviceTypeId) {
+          try {
+            const readinessRaw = await handleWorkflowTool('pco_weekend_readiness', {
+              serviceTypeId: parsed.serviceTypeId,
+              daysAhead: 14,
+            }, client, context);
+            const readiness = JSON.parse(readinessRaw) as { data?: { totals?: any; mostUrgent?: any[] } };
+            const totals = readiness.data?.totals ?? {};
+            charts.push({
+              type: 'bar',
+              title: 'Weekend readiness by volunteer status',
+              xAxis: 'Status',
+              yAxis: 'Count',
+              series: [{
+                name: 'Volunteers',
+                data: [
+                  { label: 'Confirmed', value: totals.confirmed ?? 0 },
+                  { label: 'Pending', value: totals.pending ?? 0 },
+                  { label: 'Declined', value: totals.declined ?? 0 },
+                  { label: 'Unfilled', value: totals.unfilled ?? 0 },
+                ],
+              }],
+            });
+            tables.push({
+              title: 'Most urgent volunteer gaps',
+              columns: ['planTitle', 'planDate', 'teamPositionName', 'name', 'status'],
+              rows: readiness.data?.mostUrgent ?? [],
+            });
+          } catch (err) {
+            warnings.push({ source: 'Services', message: PlanningCenterClient.formatError(err, 'Services') });
+          }
+        }
+
+        try {
+          const people = await client.get<any>('/people/v2/people', {
+            per_page: 1,
+            'where[created_at][gte]': parsed.startDate,
+            'where[created_at][lte]': parsed.endDate,
+          });
+          insights.push(`${people.meta?.total_count ?? 0} new people records were created in this window.`);
+        } catch (err) {
+          warnings.push({ source: 'People', message: PlanningCenterClient.formatError(err, 'People') });
+        }
+
+        return JSON.stringify(toolSuccess({
+          window: { startDate: parsed.startDate, endDate: parsed.endDate },
+          summary: 'Visual-ready Planning Center dashboard snapshot. Ask Claude to render these charts as an artifact/dashboard.',
+          charts,
+          tables,
+          insights,
+          warnings,
+          recommendedActions: [
+            'Render the chart-ready data as a dashboard artifact.',
+            'Review warnings for missing module permissions or incomplete data.',
+            'Use pco_service_review_packet after weekend services to capture wins and misses.',
+          ],
+        }, {
+          pcoEndpoint: '/check-ins/v2 + /giving/v2 + /services/v2 + /people/v2',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_service_review_packet': {
+        const schema = z.object({
+          serviceTypeId: z.string(),
+          planId: z.string(),
+          includePastFeedback: z.boolean().optional().default(true),
+        });
+        const parsed = schema.parse(args);
+        const planEndpoint = `/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}`;
+        const planResponse = await client.get<any>(planEndpoint);
+        const plan = client.flatten(planResponse.data);
+
+        const [itemsResult, membersResult, timesResult, pastFeedback] = await Promise.all([
+          client.paginate(`/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/items`, { per_page: 100 }, 3).catch((err) => ({ error: PlanningCenterClient.formatError(err, 'Services'), items: [], totalCount: 0 })),
+          client.paginate(`/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/team_members`, { per_page: 100 }, 3).catch((err) => ({ error: PlanningCenterClient.formatError(err, 'Services'), items: [], totalCount: 0 })),
+          client.paginate(`/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/plan_times`, { per_page: 100 }, 3).catch((err) => ({ error: PlanningCenterClient.formatError(err, 'Services'), items: [], totalCount: 0 })),
+          parsed.includePastFeedback
+            ? feedbackStore.listServiceFeedback({ connectionId: context.connectionId, serviceTypeId: parsed.serviceTypeId, limit: 10 })
+            : Promise.resolve([]),
+        ]);
+
+        const members = 'items' in membersResult ? membersResult.items as any[] : [];
+        const statusCounts = members.reduce((acc: Record<string, number>, member: any) => {
+          const status = String(member.status ?? 'unknown');
+          acc[status] = (acc[status] ?? 0) + 1;
+          return acc;
+        }, {});
+
+        const repeatedWins = pastFeedback.flatMap((feedback) => feedback.doAgain).slice(0, 10);
+        const repeatedWarnings = pastFeedback.flatMap((feedback) => feedback.avoidNextTime).slice(0, 10);
+
+        return JSON.stringify(toolSuccess({
+          plan: {
+            serviceTypeId: parsed.serviceTypeId,
+            planId: parsed.planId,
+            title: plan.title ?? plan.series_title ?? plan.dates ?? 'Untitled plan',
+            dates: plan.dates ?? null,
+            sortDate: plan.sort_date ?? null,
+          },
+          reviewPacket: {
+            planItems: 'items' in itemsResult ? itemsResult.items : [],
+            planTimes: 'items' in timesResult ? timesResult.items : [],
+            volunteerStatusCounts: statusCounts,
+            questions: [
+              'What were the strongest ministry wins?',
+              'What moments felt confusing, distracting, or underprepared?',
+              'Which songs/elements/teams should we repeat?',
+              'What should we avoid or improve next time?',
+              'Who needs follow-up, encouragement, or coaching?',
+            ],
+          },
+          charts: [{
+            type: 'bar',
+            title: 'Volunteer response status',
+            series: [{ name: 'Team members', data: Object.entries(statusCounts).map(([label, value]) => ({ label, value })) }],
+          }],
+          pastFeedback,
+          planningAdvice: {
+            looksLikeAWin: repeatedWins,
+            considerAvoiding: repeatedWarnings,
+            note: pastFeedback.length > 0
+              ? 'Use these remembered service review notes when planning similar future services.'
+              : 'No prior feedback memory found yet. Use pco_record_service_feedback after review to build memory.',
+          },
+        }, {
+          pcoEndpoint: `${planEndpoint} + items/team_members/plan_times + service_feedback`,
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_record_service_feedback': {
+        const schema = z.object({
+          serviceTypeId: z.string(),
+          planId: z.string(),
+          planTitle: z.string().optional(),
+          planDate: z.string().optional(),
+          wins: z.array(z.string()).optional().default([]),
+          issues: z.array(z.string()).optional().default([]),
+          doAgain: z.array(z.string()).optional().default([]),
+          avoidNextTime: z.array(z.string()).optional().default([]),
+          notes: z.string().optional(),
+          tags: z.array(z.string()).optional().default([]),
+        });
+        const parsed = schema.parse(args);
+        const saved = await feedbackStore.saveServiceFeedback({
+          connectionId: context.connectionId,
+          ...parsed,
+          planTitle: parsed.planTitle ?? null,
+          planDate: parsed.planDate ?? null,
+          notes: parsed.notes ?? null,
+        });
+
+        return JSON.stringify(toolSuccess({
+          saved,
+          recommendedActions: [
+            'Use pco_service_review_packet for future similar services to recall this feedback.',
+            'Tag feedback consistently by campus, holiday, sermon series, or service style for better recall.',
+          ],
+        }, {
+          pcoEndpoint: 'service_feedback',
+          executionMs: Date.now() - start,
+        }));
+      }
+
       default:
         return JSON.stringify(toolError(`Unknown workflow tool: ${name}`));
     }
@@ -607,6 +852,57 @@ export function getWorkflowToolDefinitions() {
         type: 'object' as const,
         properties: {},
         required: [] as string[],
+      },
+    },
+    {
+      name: 'pco_dashboard_snapshot',
+      description:
+        'Return chart-ready dashboard JSON for Claude artifacts: attendance, giving, volunteer readiness, insights, tables, and recommended actions for a date range.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          startDate: { type: 'string', description: 'Start date/time ISO string' },
+          endDate: { type: 'string', description: 'End date/time ISO string' },
+          checkInsEventId: { type: 'string', description: 'Optional Check-Ins event ID for attendance trend chart' },
+          serviceTypeId: { type: 'string', description: 'Optional Services service type ID for volunteer readiness chart' },
+          weeks: { type: 'number', description: 'Weeks of attendance history to chart, default 12' },
+        },
+        required: ['startDate', 'endDate'],
+      },
+    },
+    {
+      name: 'pco_service_review_packet',
+      description:
+        'Pull a Services plan for post-weekend review: plan items, times, volunteer status, review questions, and remembered past feedback for future planning advice.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          serviceTypeId: { type: 'string', description: 'Services service type ID' },
+          planId: { type: 'string', description: 'Services plan ID' },
+          includePastFeedback: { type: 'boolean', description: 'Include stored review memory, default true' },
+        },
+        required: ['serviceTypeId', 'planId'],
+      },
+    },
+    {
+      name: 'pco_record_service_feedback',
+      description:
+        'Store post-service feedback memory: wins, issues, what to repeat, what to avoid, notes, and tags. Hosted connector requires Supabase service_feedback table.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          serviceTypeId: { type: 'string', description: 'Services service type ID' },
+          planId: { type: 'string', description: 'Services plan ID' },
+          planTitle: { type: 'string', description: 'Optional plan title' },
+          planDate: { type: 'string', description: 'Optional plan date' },
+          wins: { type: 'array', items: { type: 'string' }, description: 'What worked well' },
+          issues: { type: 'array', items: { type: 'string' }, description: 'What did not work' },
+          doAgain: { type: 'array', items: { type: 'string' }, description: 'Elements to repeat in the future' },
+          avoidNextTime: { type: 'array', items: { type: 'string' }, description: 'Elements to avoid or change next time' },
+          notes: { type: 'string', description: 'Optional review notes' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Tags like campus, holiday, series, worship, kids' },
+        },
+        required: ['serviceTypeId', 'planId'],
       },
     },
   ];

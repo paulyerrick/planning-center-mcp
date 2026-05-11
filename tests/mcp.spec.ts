@@ -144,6 +144,9 @@ test('lists Planning Center MCP tools over stdio', async () => {
       'pco_guest_followup',
       'pco_ministry_health_summary',
       'pco_connection_status',
+      'pco_dashboard_snapshot',
+      'pco_service_review_packet',
+      'pco_record_service_feedback',
     ]));
   } finally {
     await mcp.close();
@@ -454,6 +457,87 @@ test('runs ministry health summary against mocked cross-module data', async () =
     expect(payload.data.giving).toEqual({ totalDonations: 2, totalAmount: 100, averageDonation: 50 });
     expect(payload.data.groups).toMatchObject({ totalGroups: 2, emptyGroups: 1, averageGroupSize: 5 });
     expect(payload.data.moduleWarnings).toEqual([]);
+  } finally {
+    await mcp.close();
+    await mock.close();
+  }
+});
+
+test('builds a service review packet against mocked Services data', async () => {
+  const mock = await startMockPco((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const url = req.url ?? '';
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items')) {
+      res.end(JSON.stringify({
+        data: [
+          { id: 'item-1', type: 'Item', attributes: { title: 'Opening Song', item_type: 'song' } },
+          { id: 'item-2', type: 'Item', attributes: { title: 'Message', item_type: 'regular' } },
+        ],
+        meta: { total_count: 2 },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/team_members')) {
+      res.end(JSON.stringify({
+        data: [
+          { id: 'tm-1', type: 'TeamMember', attributes: { name: 'Confirmed Person', status: 'C', team_position_name: 'Vocals' } },
+          { id: 'tm-2', type: 'TeamMember', attributes: { name: 'Pending Person', status: 'P', team_position_name: 'Greeter' } },
+        ],
+        meta: { total_count: 2 },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/plan_times')) {
+      res.end(JSON.stringify({
+        data: [{ id: 'time-1', type: 'PlanTime', attributes: { starts_at: '2026-05-10T16:00:00Z' } }],
+        meta: { total_count: 1 },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1')) {
+      res.end(JSON.stringify({
+        data: {
+          id: 'plan-1',
+          type: 'Plan',
+          attributes: { title: 'Sunday Review', dates: 'May 10', sort_date: '2026-05-10T16:00:00Z' },
+        },
+      }));
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end(JSON.stringify({ errors: [{ detail: 'not found' }] }));
+  });
+
+  const mcp = new McpProcess({
+    PCO_APP_ID: 'test-id',
+    PCO_SECRET: 'test-secret',
+    PCO_BASE_URL: mock.url,
+  });
+
+  try {
+    await mcp.initialize();
+    const response = await mcp.request('tools/call', {
+      name: 'pco_service_review_packet',
+      arguments: { serviceTypeId: 'service-1', planId: 'plan-1' },
+    }, 8);
+
+    expect(response.error).toBeFalsy();
+    const content = (response.result as { content: Array<{ text: string }> }).content;
+    const payload = JSON.parse(content[0].text) as {
+      success: boolean;
+      data: { reviewPacket: { planItems: unknown[]; volunteerStatusCounts: Record<string, number>; questions: string[] }; planningAdvice: { note: string } };
+    };
+
+    expect(payload.success).toBe(true);
+    expect(payload.data.reviewPacket.planItems).toHaveLength(2);
+    expect(payload.data.reviewPacket.volunteerStatusCounts).toMatchObject({ C: 1, P: 1 });
+    expect(payload.data.reviewPacket.questions[0]).toContain('ministry wins');
+    expect(payload.data.planningAdvice.note).toContain('No prior feedback');
   } finally {
     await mcp.close();
     await mock.close();

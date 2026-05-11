@@ -23,6 +23,10 @@ https://pco-mcp.cokistudio.com/mcp/YOUR_CONNECTOR_TOKEN
 supabase/schema.sql
 ```
 
+This creates `pco_connections`, `connector_tokens`, `mcp_audit_logs`, and `service_feedback`.
+
+If you deployed before `service_feedback` existed, rerun the latest schema. It is safe to run multiple times.
+
 5. Go to **Project Settings → API**.
 6. Copy:
    - Project URL → `SUPABASE_URL`
@@ -74,8 +78,8 @@ Name: pco-mcp
 Environment: Node
 Region: closest to you
 Branch: main
-Build Command: corepack enable && pnpm install --frozen-lockfile && pnpm run build
-Start Command: pnpm run start:remote
+Build Command: npx -y pnpm@11.0.9 install --frozen-lockfile && npx -y pnpm@11.0.9 run build
+Start Command: node dist/remote.js
 ```
 
 5. Add environment variables:

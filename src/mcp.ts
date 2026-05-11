@@ -14,9 +14,9 @@ import { getGroupsToolDefinitions, handleGroupsTool } from './tools/groups.js';
 import { getPeopleToolDefinitions, handlePeopleTool } from './tools/people.js';
 import { getRegistrationsToolDefinitions, handleRegistrationsTool } from './tools/registrations.js';
 import { getServicesToolDefinitions, handleServicesTool } from './tools/services.js';
-import { getWorkflowToolDefinitions, handleWorkflowTool } from './tools/workflows.js';
+import { getWorkflowToolDefinitions, handleWorkflowTool, type WorkflowContext } from './tools/workflows.js';
 
-export function createPlanningCenterMcpServer(client: PlanningCenterClient) {
+export function createPlanningCenterMcpServer(client: PlanningCenterClient, workflowContext: WorkflowContext = {}) {
   const publicBaseUrl = (process.env.PUBLIC_BASE_URL ?? 'https://pco-mcp.cokistudio.com').replace(/\/$/, '');
   const server = new Server(
     {
@@ -77,7 +77,7 @@ export function createPlanningCenterMcpServer(client: PlanningCenterClient) {
     } else if (analyticsTools.has(name)) {
       result = await handleAnalyticsTool(name, args as Record<string, unknown>, client);
     } else if (workflowTools.has(name)) {
-      result = await handleWorkflowTool(name, args as Record<string, unknown>, client);
+      result = await handleWorkflowTool(name, args as Record<string, unknown>, client, workflowContext);
     } else {
       result = JSON.stringify({
         success: false,

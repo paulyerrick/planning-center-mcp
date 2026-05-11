@@ -117,6 +117,9 @@ Set environment variables in your shell or `.env` file before launching.
 | `pco_guest_followup` | Workflows | First-time guest follow-up and return-visit detection |
 | `pco_ministry_health_summary` | Workflows | Executive health summary across People, Check-Ins, Giving, and Groups |
 | `pco_connection_status` | Workflows | Verifies PCO credentials and module access after install |
+| `pco_dashboard_snapshot` | Workflows | Chart-ready dashboard data for Claude artifacts |
+| `pco_service_review_packet` | Workflows | Post-weekend service review packet with remembered feedback |
+| `pco_record_service_feedback` | Workflows | Stores service wins/issues/recommendations for future planning memory |
 
 ## Module Access Required
 

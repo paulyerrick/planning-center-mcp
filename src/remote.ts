@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { URL } from 'node:url';
 import dotenv from 'dotenv';
 import { PlanningCenterClient } from './client.js';
+import { SupabaseFeedbackStore } from './feedback.js';
 import { createPlanningCenterMcpServer } from './mcp.js';
 
 dotenv.config();
@@ -271,7 +272,10 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, connectorTok
 
   const accessToken = await refreshAccessToken(connection);
   const pcoClient = PlanningCenterClient.withAccessToken(accessToken);
-  const mcpServer = createPlanningCenterMcpServer(pcoClient);
+  const mcpServer = createPlanningCenterMcpServer(pcoClient, {
+    connectionId: connection.id,
+    feedbackStore: new SupabaseFeedbackStore(getSupabase()),
+  });
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
