@@ -90,6 +90,7 @@ OAUTH_STATE_SECRET=generate_a_long_random_secret
 PCO_CLIENT_ID=your_planning_center_oauth_client_id
 PCO_CLIENT_SECRET=your_planning_center_oauth_client_secret
 PCO_REDIRECT_URI=https://pco-mcp.cokistudio.com/oauth/planning-center/callback
+PCO_SCOPES=people services groups check_ins registrations giving calendar
 ```
 
 Generate secrets locally with:

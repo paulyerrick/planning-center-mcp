@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT ?? 3000);
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT}`).replace(/\/$/, '');
 const PCO_AUTHORIZE_URL = 'https://api.planningcenteronline.com/oauth/authorize';
 const PCO_TOKEN_URL = 'https://api.planningcenteronline.com/oauth/token';
+const DEFAULT_PCO_SCOPES = 'people services groups check_ins registrations giving calendar';
 
 type PcoConnectionRow = {
   id: string;
@@ -177,6 +178,7 @@ async function handleOAuthStart(_req: IncomingMessage, res: ServerResponse) {
   url.searchParams.set('client_id', requiredEnv('PCO_CLIENT_ID'));
   url.searchParams.set('redirect_uri', requiredEnv('PCO_REDIRECT_URI'));
   url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', process.env.PCO_SCOPES ?? DEFAULT_PCO_SCOPES);
   url.searchParams.set('state', state);
   res.writeHead(302, { Location: url.toString() });
   res.end();
