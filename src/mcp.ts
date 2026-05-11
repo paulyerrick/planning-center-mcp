@@ -17,8 +17,22 @@ import { getServicesToolDefinitions, handleServicesTool } from './tools/services
 import { getWorkflowToolDefinitions, handleWorkflowTool } from './tools/workflows.js';
 
 export function createPlanningCenterMcpServer(client: PlanningCenterClient) {
+  const publicBaseUrl = (process.env.PUBLIC_BASE_URL ?? 'https://pco-mcp.cokistudio.com').replace(/\/$/, '');
   const server = new Server(
-    { name: 'planning-center-mcp', version: '1.0.0' },
+    {
+      name: 'planning-center-mcp',
+      title: 'Planning Center MCP',
+      version: '1.0.0',
+      websiteUrl: publicBaseUrl,
+      description: 'Connect Claude to Planning Center Online for church operations workflows.',
+      icons: [
+        {
+          src: `${publicBaseUrl}/logo.png`,
+          mimeType: 'image/png',
+          sizes: ['1200x1200'],
+        },
+      ],
+    },
     { capabilities: { tools: {}, prompts: {} } }
   );
 

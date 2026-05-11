@@ -67,6 +67,11 @@ class McpProcess {
       clientInfo: { name: 'planning-center-mcp-tests', version: '1.0.0' },
     }, 1);
     expect(init.error).toBeFalsy();
+    const serverInfo = (init.result as { serverInfo?: { icons?: Array<{ src: string; mimeType?: string }> } }).serverInfo;
+    expect(serverInfo?.icons?.[0]).toMatchObject({
+      src: expect.stringContaining('/logo.png'),
+      mimeType: 'image/png',
+    });
     await this.notify('notifications/initialized');
   }
 
