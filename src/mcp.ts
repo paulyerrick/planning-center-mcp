@@ -6,8 +6,9 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { PlanningCenterClient } from './client.js';
-import { PCO_CONTEXT_CONTENT, PCO_CONTEXT_PROMPT } from './prompts/pco-context.js';
+import { PCO_CONTEXT_CONTENT, PCO_CONTEXT_PROMPT, PCO_ONBOARDING_CONTENT, PCO_ONBOARDING_PROMPT } from './prompts/pco-context.js';
 import { getAnalyticsToolDefinitions, handleAnalyticsTool } from './tools/analytics.js';
+import { getCapabilitiesToolDefinitions, handleCapabilitiesTool } from './tools/capabilities.js';
 import { getCheckInsToolDefinitions, handleCheckInsTool } from './tools/checkins.js';
 import { getGivingToolDefinitions, handleGivingTool } from './tools/giving.js';
 import { getGroupsToolDefinitions, handleGroupsTool } from './tools/groups.js';
@@ -45,6 +46,7 @@ export function createPlanningCenterMcpServer(client: PlanningCenterClient, work
     ...getGivingToolDefinitions(),
     ...getAnalyticsToolDefinitions(),
     ...getWorkflowToolDefinitions(),
+    ...getCapabilitiesToolDefinitions(),
   ];
 
   const servicesTools = new Set(getServicesToolDefinitions().map((tool) => tool.name));
@@ -55,6 +57,7 @@ export function createPlanningCenterMcpServer(client: PlanningCenterClient, work
   const givingTools = new Set(getGivingToolDefinitions().map((tool) => tool.name));
   const analyticsTools = new Set(getAnalyticsToolDefinitions().map((tool) => tool.name));
   const workflowTools = new Set(getWorkflowToolDefinitions().map((tool) => tool.name));
+  const capabilitiesTools = new Set(getCapabilitiesToolDefinitions().map((tool) => tool.name));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: allTools }));
 
@@ -78,6 +81,8 @@ export function createPlanningCenterMcpServer(client: PlanningCenterClient, work
       result = await handleAnalyticsTool(name, args as Record<string, unknown>, client);
     } else if (workflowTools.has(name)) {
       result = await handleWorkflowTool(name, args as Record<string, unknown>, client, workflowContext);
+    } else if (capabilitiesTools.has(name)) {
+      result = await handleCapabilitiesTool(name);
     } else {
       result = JSON.stringify({
         success: false,
@@ -91,7 +96,7 @@ export function createPlanningCenterMcpServer(client: PlanningCenterClient, work
   });
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-    prompts: [PCO_CONTEXT_PROMPT],
+    prompts: [PCO_CONTEXT_PROMPT, PCO_ONBOARDING_PROMPT],
   }));
 
   server.setRequestHandler(GetPromptRequestSchema, async (request) => {
@@ -102,6 +107,17 @@ export function createPlanningCenterMcpServer(client: PlanningCenterClient, work
           {
             role: 'user' as const,
             content: { type: 'text' as const, text: PCO_CONTEXT_CONTENT },
+          },
+        ],
+      };
+    }
+    if (request.params.name === 'pco-onboarding') {
+      return {
+        description: PCO_ONBOARDING_PROMPT.description,
+        messages: [
+          {
+            role: 'user' as const,
+            content: { type: 'text' as const, text: PCO_ONBOARDING_CONTENT },
           },
         ],
       };

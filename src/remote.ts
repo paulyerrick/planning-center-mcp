@@ -260,6 +260,15 @@ async function handleOAuthCallback(url: URL, res: ServerResponse) {
   <p>Copy this Remote MCP server URL into Claude → Settings → Connectors → Add custom connector:</p>
   <pre style="background:#f5f5f5;padding:16px;white-space:pre-wrap;word-break:break-all;">${mcpUrl}</pre>
   <p><strong>Security:</strong> treat this URL like a password. Anyone with it can use this connector until revoked.</p>
+  <h2>Try these prompts in Claude</h2>
+  <ol>
+    <li>Check my Planning Center connection status.</li>
+    <li>What can this Planning Center connector do?</li>
+    <li>List our active weekend service types.</li>
+    <li>What might break this Sunday?</li>
+    <li>Create a dashboard snapshot for this month and render it visually.</li>
+    <li>Pull a service review packet for our most recent weekend service.</li>
+  </ol>
 </body></html>`);
 }
 
@@ -315,6 +324,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         <h1>Planning Center MCP</h1>
         <p>Connect Planning Center to Claude with a remote MCP connector.</p>
         <p><a href="/connect/planning-center">Connect Planning Center</a></p>
+        <h2>What this connector can do</h2>
+        <ul>
+          <li>Weekend readiness and volunteer gap checks</li>
+          <li>First-time guest follow-up</li>
+          <li>Visual dashboard snapshots for Claude artifacts</li>
+          <li>Post-service review packets and remembered feedback</li>
+          <li>Planning Center cleanup and module diagnostics</li>
+        </ul>
       </body></html>`);
       return;
     }

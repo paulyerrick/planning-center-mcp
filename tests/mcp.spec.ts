@@ -147,6 +147,31 @@ test('lists Planning Center MCP tools over stdio', async () => {
       'pco_dashboard_snapshot',
       'pco_service_review_packet',
       'pco_record_service_feedback',
+      'pco_capabilities_guide',
+    ]));
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('returns a capabilities guide for onboarding', async () => {
+  const mcp = new McpProcess({ PCO_APP_ID: 'test-id', PCO_SECRET: 'test-secret' });
+  try {
+    await mcp.initialize();
+    const response = await mcp.request('tools/call', {
+      name: 'pco_capabilities_guide',
+      arguments: {},
+    }, 9);
+
+    expect(response.error).toBeFalsy();
+    const content = (response.result as { content: Array<{ text: string }> }).content;
+    const payload = JSON.parse(content[0].text) as { success: boolean; data: { bestFirstPrompts: string[]; capabilities: Array<{ category: string }> } };
+    expect(payload.success).toBe(true);
+    expect(payload.data.bestFirstPrompts[0]).toContain('connection status');
+    expect(payload.data.capabilities.map((capability) => capability.category)).toEqual(expect.arrayContaining([
+      'Weekend readiness',
+      'Dashboards + visuals',
+      'Post-service review + memory',
     ]));
   } finally {
     await mcp.close();

@@ -19,6 +19,7 @@
 - [x] Add `pco_connection_status` for onboarding/module diagnostics
 - [x] Add chart-ready `pco_dashboard_snapshot`
 - [x] Add service review memory: `pco_service_review_packet` + `pco_record_service_feedback`
+- [x] Add `pco_capabilities_guide` and onboarding prompt for capability discovery
 
 ## Milestone 3 — QA + Release
 - [x] Add Playwright coverage target: 90% where MCP/browser-visible behavior exists

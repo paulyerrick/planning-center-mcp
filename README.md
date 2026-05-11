@@ -120,6 +120,7 @@ Set environment variables in your shell or `.env` file before launching.
 | `pco_dashboard_snapshot` | Workflows | Chart-ready dashboard data for Claude artifacts |
 | `pco_service_review_packet` | Workflows | Post-weekend service review packet with remembered feedback |
 | `pco_record_service_feedback` | Workflows | Stores service wins/issues/recommendations for future planning memory |
+| `pco_capabilities_guide` | Onboarding | Explains what the connector can do and best prompts to try |
 
 ## Module Access Required
 

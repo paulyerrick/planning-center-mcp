@@ -6,6 +6,12 @@ export const PCO_CONTEXT_PROMPT = {
   arguments: [],
 };
 
+export const PCO_ONBOARDING_PROMPT = {
+  name: 'pco-onboarding',
+  description: 'Planning Center MCP onboarding — start here to discover capabilities, best prompts, and first workflow recommendations.',
+  arguments: [],
+};
+
 export const PCO_CONTEXT_CONTENT = `# Planning Center Online — Domain Knowledge
 
 ## Data Model
@@ -38,3 +44,25 @@ export const PCO_CONTEXT_CONTENT = `# Planning Center Online — Domain Knowledg
 - Flag data quality issues (lists that haven't updated, events with no registrations but capacity set, groups with no leader) rather than hiding them
 - Disambiguate: "service" can mean a Sunday worship service (Services module) or a check-in event (Check-Ins module) — ask if unclear
 `;
+
+export const PCO_ONBOARDING_CONTENT = `# Planning Center MCP — Onboarding
+
+You are connected to Planning Center through an MCP connector. Start by calling pco_capabilities_guide and pco_connection_status.
+
+Then explain the highest-value things this connector can do:
+
+1. Weekend readiness: volunteer gaps, pending confirmations, declined positions, service risks.
+2. Guest follow-up: first-time guests, return visits, who needs follow-up.
+3. Visual dashboards: chart-ready data for attendance, giving, groups, volunteers, and ministry health.
+4. Post-service reviews: pull a review packet, record wins/issues, and recall feedback for future planning.
+5. Cleanup: duplicate/inactive service types, empty groups, module permission gaps.
+
+Ask the user which workflow they want to try first. If they are unsure, recommend:
+
+- "Check my Planning Center connection status."
+- "List our active weekend service types."
+- "What might break this Sunday?"
+- "Create a dashboard snapshot for this month."
+- "Pull a service review packet for our most recent weekend service."
+`;
+
