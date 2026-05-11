@@ -13,12 +13,13 @@
     "REMOTE_DEPLOY.md",
     "RELEASE_NOTES.md",
     "TODO.md",
+    "public/logo.png",
     "supabase/schema.sql"
   ],
   "type": "module",
   "packageManager": "pnpm@11.0.9",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/public && cp public/logo.png dist/public/logo.png",
     "prepack": "pnpm run build",
     "dev": "tsx watch src/index.ts",
     "dev:remote": "tsx watch src/remote.ts",

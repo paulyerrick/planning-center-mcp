@@ -3,7 +3,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import axios from 'axios';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http, { IncomingMessage, ServerResponse } from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { URL } from 'node:url';
 import dotenv from 'dotenv';
 import { PlanningCenterClient } from './client.js';
@@ -16,6 +19,8 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT
 const PCO_AUTHORIZE_URL = 'https://api.planningcenteronline.com/oauth/authorize';
 const PCO_TOKEN_URL = 'https://api.planningcenteronline.com/oauth/token';
 const DEFAULT_PCO_SCOPES = 'people services groups check_ins registrations giving calendar';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LOGO_PATH = path.resolve(__dirname, '../public/logo.png');
 
 type PcoConnectionRow = {
   id: string;
@@ -107,6 +112,28 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
 function sendHtml(res: ServerResponse, status: number, html: string) {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
+}
+
+function sendLogo(res: ServerResponse) {
+  if (!fs.existsSync(LOGO_PATH)) {
+    sendJson(res, 404, { error: 'Logo not found' });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'image/png',
+    'Cache-Control': 'public, max-age=86400',
+  });
+  fs.createReadStream(LOGO_PATH).pipe(res);
+}
+
+function pageHead(title: string) {
+  return `<head>
+    <title>${title}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:image" content="${PUBLIC_BASE_URL}/logo.png" />
+  </head>`;
 }
 
 async function exchangeCodeForToken(code: string): Promise<TokenResponse> {
@@ -224,8 +251,9 @@ async function handleOAuthCallback(url: URL, res: ServerResponse) {
 
   const mcpUrl = `${PUBLIC_BASE_URL}/mcp/${connectorToken}`;
   sendHtml(res, 200, `<!doctype html>
-<html><head><title>Planning Center Connected</title></head>
+<html>${pageHead('Planning Center Connected')}
 <body style="font-family: system-ui; max-width: 760px; margin: 40px auto; line-height: 1.5;">
+  <img src="/logo.png" alt="Planning Center" width="72" height="72" style="border-radius:16px;" />
   <h1>Planning Center connected</h1>
   <p>Connected as <strong>${person.name ?? person.id}</strong>.</p>
   <p>Copy this Remote MCP server URL into Claude → Settings → Connectors → Add custom connector:</p>
@@ -271,8 +299,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (url.pathname === '/logo.png' || url.pathname === '/favicon.png') {
+      sendLogo(res);
+      return;
+    }
+
     if (url.pathname === '/' || url.pathname === '/setup') {
-      sendHtml(res, 200, `<!doctype html><html><body style="font-family: system-ui; max-width: 760px; margin: 40px auto; line-height: 1.5;">
+      sendHtml(res, 200, `<!doctype html><html>${pageHead('Planning Center MCP')}
+      <body style="font-family: system-ui; max-width: 760px; margin: 40px auto; line-height: 1.5;">
+        <img src="/logo.png" alt="Planning Center" width="72" height="72" style="border-radius:16px;" />
         <h1>Planning Center MCP</h1>
         <p>Connect Planning Center to Claude with a remote MCP connector.</p>
         <p><a href="/connect/planning-center">Connect Planning Center</a></p>
