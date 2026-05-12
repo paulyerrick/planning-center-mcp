@@ -42,15 +42,33 @@ export class PlanningCenterClient {
   ): Promise<T> {
     const cleanParams = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
-    );
+    ) as Record<string, string | number>;
+    return this.requestWithRetry<T>('GET', path, { params: cleanParams });
+  }
+
+  /** Single PATCH request with retry/backoff for transient PCO failures and rate limits */
+  async patch<T = JsonApiResponse>(
+    path: string,
+    data: unknown
+  ): Promise<T> {
+    return this.requestWithRetry<T>('PATCH', path, { data });
+  }
+
+  private async requestWithRetry<T>(
+    method: 'GET' | 'PATCH',
+    path: string,
+    options: { params?: Record<string, string | number>; data?: unknown } = {}
+  ): Promise<T> {
     const start = Date.now();
     const maxAttempts = 3;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const response = await this.http.get<T>(path, { params: cleanParams });
+        const response = method === 'GET'
+          ? await this.http.get<T>(path, { params: options.params })
+          : await this.http.patch<T>(path, options.data);
         if (process.env.DEBUG) {
-          console.error(`[PCO] GET ${path} attempt=${attempt} (${Date.now() - start}ms)`);
+          console.error(`[PCO] ${method} ${path} attempt=${attempt} (${Date.now() - start}ms)`);
         }
         return response.data;
       } catch (err) {
@@ -67,13 +85,13 @@ export class PlanningCenterClient {
         const backoffMs = retryAfterMs ?? Math.min(10_000, 1000 * 2 ** (attempt - 1));
 
         if (process.env.DEBUG) {
-          console.error(`[PCO] Retryable HTTP ${status} on ${path}; retrying in ${backoffMs}ms`);
+          console.error(`[PCO] Retryable HTTP ${status} on ${method} ${path}; retrying in ${backoffMs}ms`);
         }
         await this.sleep(backoffMs);
       }
     }
 
-    throw new Error(`Request failed after ${maxAttempts} attempts: ${path}`);
+    throw new Error(`Request failed after ${maxAttempts} attempts: ${method} ${path}`);
   }
 
   /** Auto-paginating GET — fetches up to maxPages pages of per_page=100 */

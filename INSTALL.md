@@ -165,4 +165,5 @@ Summarize this for a church operations meeting. Give me only risks, recommended 
 - This MCP runs locally on your computer.
 - Do not paste your PCO secret into chat messages.
 - Put credentials only in the Claude MCP config `env` block or your local shell environment.
-- Start with read-only questions. Do not add write tools until you trust the setup.
+- Start with read-only questions first. Services write tools are disabled unless `PCO_WRITABLE_SERVICE_TYPE_IDS` is configured.
+- If you use Services write tools, always run preview tools before apply tools.

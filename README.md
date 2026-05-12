@@ -109,6 +109,14 @@ Set environment variables in your shell or `.env` file before launching.
 | `pco_get_unfilled_positions` | Services | Unfilled volunteer slots in upcoming services |
 | `pco_get_service_attendance` | Services | Headcount for a past service |
 | `pco_search_songs` | Services | Search the song library |
+| `pco_get_plan_times_detailed` | Services | Detailed service/rehearsal clock times for a plan |
+| `pco_preview_item_title_replace` | Services (write-safe) | Dry-run bulk item title find/replace with preview token |
+| `pco_apply_item_title_replace` | Services (write-safe) | Apply a previewed bulk title replace |
+| `pco_preview_sync_item_from_reference_plan` | Services (write-safe) | Dry-run sync of item fields from a reference plan item |
+| `pco_apply_sync_item_from_reference_plan` | Services (write-safe) | Apply a previewed reference-plan item sync |
+| `pco_get_services_preview_summary` | Services (write-safe) | Dry-run grouped summary by service type/plan/item type for a preview token |
+| `pco_get_services_write_audit_log` | Services (write-safe) | List recent Services write operations and counts |
+| `pco_rollback_services_write_operation` | Services (write-safe) | Roll back a prior Services write operation |
 | `pco_search_people` | People | Search for people by name or email |
 | `pco_get_person` | People | Full profile for a specific person |
 | `pco_list_saved_lists` | People | All saved people lists |
@@ -140,6 +148,18 @@ Set environment variables in your shell or `.env` file before launching.
 | `pco_service_review_packet` | Workflows | Post-weekend service review packet with remembered feedback |
 | `pco_record_service_feedback` | Workflows | Stores service wins/issues/recommendations for future planning memory |
 | `pco_capabilities_guide` | Onboarding | Explains what the connector can do and best prompts to try |
+
+## Services Write Safety (Allowlist)
+
+Services write/edit tools are **disabled by default**.
+
+To enable them, set:
+
+```bash
+PCO_WRITABLE_SERVICE_TYPE_IDS=12345,67890
+```
+
+When set, write tools can only modify those service type IDs. This helps constrain AI-driven edits in Claude/ChatGPT to approved campuses/service types.
 
 ## Module Access Required
 

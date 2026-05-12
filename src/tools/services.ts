@@ -1,7 +1,220 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import crypto from 'node:crypto';
 import { z } from 'zod';
 import { PlanningCenterClient } from '../client.js';
 import { toolSuccess, toolError } from '../response.js';
+
+type MatchMode = 'exact' | 'contains' | 'regex';
+type SyncField = 'title' | 'description' | 'notes';
+
+type PreviewChange = {
+  serviceTypeId: string;
+  planId: string;
+  planDate?: string;
+  itemId: string;
+  itemSequence?: number;
+  itemType?: string;
+  beforeAttributes: Record<string, unknown>;
+  afterAttributes: Record<string, unknown>;
+  reason?: string;
+};
+
+type PreviewOperation = {
+  token: string;
+  kind: 'replace' | 'sync';
+  createdAt: string;
+  expiresAt: string;
+  changes: PreviewChange[];
+  summary: Record<string, unknown>;
+};
+
+type AppliedWriteOperation = {
+  operationId: string;
+  kind: 'replace' | 'sync';
+  appliedAt: string;
+  sourcePreviewToken: string;
+  applied: PreviewChange[];
+  skipped: Array<Record<string, unknown>>;
+  errors: Array<Record<string, unknown>>;
+};
+
+const PREVIEW_TTL_MS = 15 * 60_000;
+const AUDIT_TTL_MS = 7 * 24 * 60 * 60_000;
+const previewOperations = new Map<string, PreviewOperation>();
+const auditOperations = new Map<string, AppliedWriteOperation>();
+
+function prunePreviewOperations() {
+  const now = Date.now();
+  for (const [token, op] of previewOperations.entries()) {
+    if (new Date(op.expiresAt).getTime() <= now) {
+      previewOperations.delete(token);
+    }
+  }
+}
+
+function createPreviewOperation(kind: 'replace' | 'sync', changes: PreviewChange[], summary: Record<string, unknown>) {
+  prunePreviewOperations();
+  const token = `preview_${crypto.randomBytes(18).toString('base64url')}`;
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS).toISOString();
+  const op: PreviewOperation = { token, kind, createdAt, expiresAt, changes, summary };
+  previewOperations.set(token, op);
+  return op;
+}
+
+function getPreviewOperation(token: string, kind: 'replace' | 'sync') {
+  prunePreviewOperations();
+  const op = previewOperations.get(token);
+  if (!op || op.kind !== kind) return null;
+  if (new Date(op.expiresAt).getTime() <= Date.now()) {
+    previewOperations.delete(token);
+    return null;
+  }
+  return op;
+}
+
+function pruneAuditOperations() {
+  const now = Date.now();
+  for (const [operationId, op] of auditOperations.entries()) {
+    if (new Date(op.appliedAt).getTime() + AUDIT_TTL_MS <= now) {
+      auditOperations.delete(operationId);
+    }
+  }
+}
+
+function saveAuditOperation(operation: AppliedWriteOperation) {
+  pruneAuditOperations();
+  auditOperations.set(operation.operationId, operation);
+}
+
+function getAuditOperation(operationId: string) {
+  pruneAuditOperations();
+  return auditOperations.get(operationId) ?? null;
+}
+
+function getWritableServiceTypeAllowlist(): Set<string> | null {
+  const raw = process.env.PCO_WRITABLE_SERVICE_TYPE_IDS?.trim();
+  if (!raw) return null;
+  const ids = raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return new Set(ids);
+}
+
+function validateWritableTargets(serviceTypeIds: string[]) {
+  const allowlist = getWritableServiceTypeAllowlist();
+  if (!allowlist) {
+    return 'Services write tools are disabled. Set PCO_WRITABLE_SERVICE_TYPE_IDS to a comma-separated allowlist of writable service type IDs.';
+  }
+  const disallowed = Array.from(new Set(serviceTypeIds)).filter((id) => !allowlist.has(id));
+  if (disallowed.length === 0) return null;
+  return `Write access denied for serviceTypeId(s): ${disallowed.join(', ')}. Allowed IDs are set by PCO_WRITABLE_SERVICE_TYPE_IDS.`;
+}
+
+function summarizePreviewChanges(changes: PreviewChange[]) {
+  const byServiceType: Record<string, number> = {};
+  const byPlan: Record<string, number> = {};
+  const byItemType: Record<string, number> = {};
+
+  for (const change of changes) {
+    byServiceType[change.serviceTypeId] = (byServiceType[change.serviceTypeId] ?? 0) + 1;
+    const planKey = `${change.serviceTypeId}/${change.planId}`;
+    byPlan[planKey] = (byPlan[planKey] ?? 0) + 1;
+    const itemType = change.itemType || 'unknown';
+    byItemType[itemType] = (byItemType[itemType] ?? 0) + 1;
+  }
+
+  const topPlans = Object.entries(byPlan)
+    .map(([plan, count]) => ({ plan, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  return {
+    totalChanges: changes.length,
+    serviceTypeBreakdown: byServiceType,
+    itemTypeBreakdown: byItemType,
+    topPlans,
+  };
+}
+
+function matchesText(title: string, findText: string, matchMode: MatchMode, caseSensitive: boolean) {
+  if (matchMode === 'regex') {
+    const flags = caseSensitive ? '' : 'i';
+    const regex = new RegExp(findText, flags);
+    return regex.test(title);
+  }
+
+  const baseTitle = caseSensitive ? title : title.toLowerCase();
+  const baseFind = caseSensitive ? findText : findText.toLowerCase();
+
+  if (matchMode === 'exact') {
+    return baseTitle === baseFind;
+  }
+
+  return baseTitle.includes(baseFind);
+}
+
+function replaceTitle(title: string, findText: string, replaceText: string, matchMode: MatchMode, caseSensitive: boolean) {
+  if (matchMode === 'regex') {
+    const flags = caseSensitive ? 'g' : 'gi';
+    return title.replace(new RegExp(findText, flags), replaceText);
+  }
+
+  if (matchMode === 'exact') {
+    return replaceText;
+  }
+
+  if (caseSensitive) {
+    return title.split(findText).join(replaceText);
+  }
+
+  const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return title.replace(new RegExp(escaped, 'gi'), replaceText);
+}
+
+function inDateRange(sortDate: string, startDate: Date, endDate: Date) {
+  const target = new Date(sortDate);
+  return target >= startDate && target <= endDate;
+}
+
+function normalizeDateRange(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T23:59:59.999Z`);
+  return { start, end };
+}
+
+async function getPlanItems(
+  client: PlanningCenterClient,
+  serviceTypeId: string,
+  planId: string
+): Promise<Array<Record<string, unknown> & { id: string }>> {
+  const { items } = await client.paginate<Record<string, unknown>>(
+    `/services/v2/service_types/${serviceTypeId}/plans/${planId}/items`,
+    { per_page: 100 },
+    3
+  );
+  return items as Array<Record<string, unknown> & { id: string }>;
+}
+
+async function resolveItemBySelector(
+  client: PlanningCenterClient,
+  serviceTypeId: string,
+  planId: string,
+  selector: { byId?: string; byExactTitle?: string; bySequence?: number }
+): Promise<(Record<string, unknown> & { id: string }) | null> {
+  const items = await getPlanItems(client, serviceTypeId, planId);
+  if (selector.byId) {
+    return items.find((item) => item.id === selector.byId) ?? null;
+  }
+  if (selector.byExactTitle) {
+    return items.find((item) => String(item.title ?? '') === selector.byExactTitle) ?? null;
+  }
+  if (typeof selector.bySequence === 'number') {
+    return items.find((item) => Number(item.sequence ?? -1) === selector.bySequence) ?? null;
+  }
+  return null;
+}
 
 /** Register all Services module tools */
 export function registerServicesTools(server: Server, client: PlanningCenterClient): void {
@@ -469,6 +682,586 @@ export async function handleServicesTool(
         return JSON.stringify(result);
       }
 
+      case 'pco_preview_item_title_replace': {
+        const schema = z.object({
+          targetServiceTypeIds: z.array(z.string()).min(1),
+          startDate: z.string(),
+          endDate: z.string(),
+          findText: z.string().min(1),
+          replaceText: z.string(),
+          matchMode: z.enum(['exact', 'contains', 'regex']).optional().default('exact'),
+          itemType: z.enum(['song', 'media', 'header', 'regular']).optional(),
+          caseSensitive: z.boolean().optional().default(false),
+          maxPlansScanned: z.number().int().positive().optional().default(200),
+        });
+        const parsed = schema.parse(args);
+
+        const writableError = validateWritableTargets(parsed.targetServiceTypeIds);
+        if (writableError) {
+          return JSON.stringify(toolError(writableError));
+        }
+
+        const { start: startDate, end: endDate } = normalizeDateRange(parsed.startDate, parsed.endDate);
+        if (endDate < startDate) {
+          return JSON.stringify(toolError('endDate must be on or after startDate.'));
+        }
+
+        const pageLimit = Math.max(1, Math.ceil(parsed.maxPlansScanned / 100));
+        const warnings: string[] = [];
+        const changes: PreviewChange[] = [];
+        let plansScanned = 0;
+
+        for (const serviceTypeId of parsed.targetServiceTypeIds) {
+          if (plansScanned >= parsed.maxPlansScanned) {
+            warnings.push('Stopped scanning because maxPlansScanned was reached.');
+            break;
+          }
+
+          const { items: plans } = await client.paginate<Record<string, unknown>>(
+            `/services/v2/service_types/${serviceTypeId}/plans`,
+            { order: 'sort_date' },
+            pageLimit
+          );
+
+          for (const plan of plans) {
+            if (plansScanned >= parsed.maxPlansScanned) break;
+            const sortDate = String((plan as any).sort_date ?? '');
+            if (!sortDate || !inDateRange(sortDate, startDate, endDate)) continue;
+            plansScanned++;
+
+            const planId = String((plan as any).id ?? '');
+            if (!planId) continue;
+
+            const items = await getPlanItems(client, serviceTypeId, planId);
+            for (const item of items) {
+              const title = String(item.title ?? '');
+              if (!title) continue;
+              if (parsed.itemType && String(item.item_type ?? '') !== parsed.itemType) continue;
+              if (!matchesText(title, parsed.findText, parsed.matchMode as MatchMode, parsed.caseSensitive)) continue;
+
+              const nextTitle = replaceTitle(title, parsed.findText, parsed.replaceText, parsed.matchMode as MatchMode, parsed.caseSensitive);
+              if (nextTitle === title) continue;
+
+              changes.push({
+                serviceTypeId,
+                planId,
+                planDate: sortDate,
+                itemId: item.id,
+                itemSequence: Number(item.sequence ?? 0),
+                itemType: String(item.item_type ?? ''),
+                beforeAttributes: { title },
+                afterAttributes: { title: nextTitle },
+                reason: `Matched ${parsed.matchMode}`,
+              });
+            }
+          }
+        }
+
+        const op = createPreviewOperation('replace', changes, {
+          plansScanned,
+          serviceTypes: parsed.targetServiceTypeIds,
+          dateRange: { startDate: parsed.startDate, endDate: parsed.endDate },
+          matchMode: parsed.matchMode,
+          warnings,
+        });
+
+        return JSON.stringify(toolSuccess({
+          previewToken: op.token,
+          createdAt: op.createdAt,
+          expiresAt: op.expiresAt,
+          plansScanned,
+          totalChanges: changes.length,
+          summary: summarizePreviewChanges(changes),
+          warnings,
+          changes,
+        }, {
+          count: changes.length,
+          pcoEndpoint: '/services/v2/service_types/*/plans/*/items',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_apply_item_title_replace': {
+        const schema = z.object({
+          previewToken: z.string(),
+          confirmPhrase: z.literal('APPLY_CHANGES'),
+          maxChanges: z.number().int().positive().optional().default(100),
+          requireCurrentValueMatch: z.boolean().optional().default(true),
+        });
+        const parsed = schema.parse(args);
+        const op = getPreviewOperation(parsed.previewToken, 'replace');
+        if (!op) {
+          return JSON.stringify(toolError('Invalid or expired previewToken for replace operation. Run preview again.'));
+        }
+
+        const writableError = validateWritableTargets(op.changes.map((change) => change.serviceTypeId));
+        if (writableError) {
+          return JSON.stringify(toolError(writableError));
+        }
+
+        if (op.changes.length > parsed.maxChanges) {
+          return JSON.stringify(toolError(`Preview contains ${op.changes.length} changes, which exceeds maxChanges=${parsed.maxChanges}.`));
+        }
+
+        const applied: PreviewChange[] = [];
+        const skipped: Array<Record<string, unknown>> = [];
+        const errors: Array<Record<string, unknown>> = [];
+
+        for (const change of op.changes) {
+          const itemEndpoint = `/services/v2/service_types/${change.serviceTypeId}/plans/${change.planId}/items/${change.itemId}`;
+          try {
+            if (parsed.requireCurrentValueMatch) {
+              const current = await client.get<any>(itemEndpoint);
+              const currentFlat = current?.data ? client.flatten(current.data) : null;
+              let mismatch = false;
+              for (const [key, expected] of Object.entries(change.beforeAttributes)) {
+                if ((currentFlat as any)?.[key] !== expected) {
+                  mismatch = true;
+                  break;
+                }
+              }
+              if (mismatch) {
+                skipped.push({ ...change, reason: 'Current value no longer matches preview baseline.' });
+                continue;
+              }
+            }
+
+            await client.patch(itemEndpoint, {
+              data: {
+                type: 'Item',
+                attributes: change.afterAttributes,
+              },
+            });
+            applied.push(change);
+          } catch (err) {
+            errors.push({
+              ...change,
+              error: PlanningCenterClient.formatError(err, 'Services'),
+            });
+          }
+        }
+
+        previewOperations.delete(parsed.previewToken);
+        const operationId = `replace_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+        saveAuditOperation({
+          operationId,
+          kind: 'replace',
+          appliedAt: new Date().toISOString(),
+          sourcePreviewToken: parsed.previewToken,
+          applied,
+          skipped,
+          errors,
+        });
+
+        return JSON.stringify(toolSuccess({
+          operationId,
+          sourcePreviewToken: parsed.previewToken,
+          attempted: op.changes.length,
+          appliedCount: applied.length,
+          skippedCount: skipped.length,
+          errorCount: errors.length,
+          applied,
+          skipped,
+          errors,
+        }, {
+          count: applied.length,
+          pcoEndpoint: '/services/v2/service_types/*/plans/*/items/*',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_preview_sync_item_from_reference_plan': {
+        const selectorSchema = z.object({
+          byId: z.string().optional(),
+          byExactTitle: z.string().optional(),
+          bySequence: z.number().optional(),
+        }).refine((value) => Boolean(value.byId || value.byExactTitle || typeof value.bySequence === 'number'), {
+          message: 'Provide one selector: byId, byExactTitle, or bySequence.',
+        });
+
+        const schema = z.object({
+          reference: z.object({
+            serviceTypeId: z.string(),
+            planId: z.string(),
+            itemSelector: selectorSchema,
+          }),
+          targets: z.array(z.object({
+            serviceTypeId: z.string(),
+            planId: z.string(),
+            itemSelector: selectorSchema,
+          })).min(1),
+          fields: z.array(z.enum(['title', 'description', 'notes'])).min(1).optional().default(['title']),
+        });
+        const parsed = schema.parse(args);
+
+        const writableError = validateWritableTargets(parsed.targets.map((target) => target.serviceTypeId));
+        if (writableError) {
+          return JSON.stringify(toolError(writableError));
+        }
+
+        const referenceItem = await resolveItemBySelector(
+          client,
+          parsed.reference.serviceTypeId,
+          parsed.reference.planId,
+          parsed.reference.itemSelector
+        );
+
+        if (!referenceItem) {
+          return JSON.stringify(toolError('Reference item not found using the provided selector.'));
+        }
+
+        const syncFields = parsed.fields as SyncField[];
+        const refAttributes = Object.fromEntries(syncFields.map((field) => [field, referenceItem[field] ?? null]));
+        const changes: PreviewChange[] = [];
+        const warnings: string[] = [];
+
+        for (const target of parsed.targets) {
+          const targetItem = await resolveItemBySelector(
+            client,
+            target.serviceTypeId,
+            target.planId,
+            target.itemSelector
+          );
+
+          if (!targetItem) {
+            warnings.push(`Target item not found for serviceTypeId=${target.serviceTypeId}, planId=${target.planId}.`);
+            continue;
+          }
+
+          const beforeAttributes: Record<string, unknown> = {};
+          const afterAttributes: Record<string, unknown> = {};
+          for (const field of syncFields) {
+            const before = targetItem[field] ?? null;
+            const after = refAttributes[field] ?? null;
+            if (before !== after) {
+              beforeAttributes[field] = before;
+              afterAttributes[field] = after;
+            }
+          }
+
+          if (Object.keys(afterAttributes).length === 0) continue;
+
+          changes.push({
+            serviceTypeId: target.serviceTypeId,
+            planId: target.planId,
+            itemId: targetItem.id,
+            itemSequence: Number(targetItem.sequence ?? 0),
+            itemType: String(targetItem.item_type ?? ''),
+            beforeAttributes,
+            afterAttributes,
+            reason: `Synced from reference ${parsed.reference.serviceTypeId}/${parsed.reference.planId}`,
+          });
+        }
+
+        const op = createPreviewOperation('sync', changes, {
+          reference: parsed.reference,
+          targets: parsed.targets.length,
+          fields: syncFields,
+          warnings,
+        });
+
+        return JSON.stringify(toolSuccess({
+          previewToken: op.token,
+          createdAt: op.createdAt,
+          expiresAt: op.expiresAt,
+          totalChanges: changes.length,
+          summary: summarizePreviewChanges(changes),
+          warnings,
+          referenceItem: {
+            id: referenceItem.id,
+            title: referenceItem.title ?? null,
+            sequence: referenceItem.sequence ?? null,
+          },
+          changes,
+        }, {
+          count: changes.length,
+          pcoEndpoint: '/services/v2/service_types/*/plans/*/items/*',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_apply_sync_item_from_reference_plan': {
+        const schema = z.object({
+          previewToken: z.string(),
+          confirmPhrase: z.literal('APPLY_CHANGES'),
+          maxChanges: z.number().int().positive().optional().default(100),
+          requireCurrentValueMatch: z.boolean().optional().default(true),
+        });
+        const parsed = schema.parse(args);
+        const op = getPreviewOperation(parsed.previewToken, 'sync');
+        if (!op) {
+          return JSON.stringify(toolError('Invalid or expired previewToken for sync operation. Run preview again.'));
+        }
+
+        const writableError = validateWritableTargets(op.changes.map((change) => change.serviceTypeId));
+        if (writableError) {
+          return JSON.stringify(toolError(writableError));
+        }
+
+        if (op.changes.length > parsed.maxChanges) {
+          return JSON.stringify(toolError(`Preview contains ${op.changes.length} changes, which exceeds maxChanges=${parsed.maxChanges}.`));
+        }
+
+        const applied: PreviewChange[] = [];
+        const skipped: Array<Record<string, unknown>> = [];
+        const errors: Array<Record<string, unknown>> = [];
+
+        for (const change of op.changes) {
+          const itemEndpoint = `/services/v2/service_types/${change.serviceTypeId}/plans/${change.planId}/items/${change.itemId}`;
+          try {
+            if (parsed.requireCurrentValueMatch) {
+              const current = await client.get<any>(itemEndpoint);
+              const currentFlat = current?.data ? client.flatten(current.data) : null;
+              let mismatch = false;
+              for (const [key, expected] of Object.entries(change.beforeAttributes)) {
+                if ((currentFlat as any)?.[key] !== expected) {
+                  mismatch = true;
+                  break;
+                }
+              }
+              if (mismatch) {
+                skipped.push({ ...change, reason: 'Current value no longer matches preview baseline.' });
+                continue;
+              }
+            }
+
+            await client.patch(itemEndpoint, {
+              data: {
+                type: 'Item',
+                attributes: change.afterAttributes,
+              },
+            });
+            applied.push(change);
+          } catch (err) {
+            errors.push({
+              ...change,
+              error: PlanningCenterClient.formatError(err, 'Services'),
+            });
+          }
+        }
+
+        previewOperations.delete(parsed.previewToken);
+        const operationId = `sync_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+        saveAuditOperation({
+          operationId,
+          kind: 'sync',
+          appliedAt: new Date().toISOString(),
+          sourcePreviewToken: parsed.previewToken,
+          applied,
+          skipped,
+          errors,
+        });
+
+        return JSON.stringify(toolSuccess({
+          operationId,
+          sourcePreviewToken: parsed.previewToken,
+          attempted: op.changes.length,
+          appliedCount: applied.length,
+          skippedCount: skipped.length,
+          errorCount: errors.length,
+          applied,
+          skipped,
+          errors,
+        }, {
+          count: applied.length,
+          pcoEndpoint: '/services/v2/service_types/*/plans/*/items/*',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_get_plan_times_detailed': {
+        const schema = z.object({
+          serviceTypeId: z.string(),
+          planId: z.string(),
+          timeZone: z.string().optional().default('UTC'),
+        });
+        const parsed = schema.parse(args);
+
+        const endpoint = `/services/v2/service_types/${parsed.serviceTypeId}/plans/${parsed.planId}/plan_times`;
+        const response = await client.get<any>(endpoint, { per_page: 100 });
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: parsed.timeZone,
+          weekday: 'short',
+          month: 'short',
+          day: '2-digit',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+
+        const times = Array.isArray(response.data)
+          ? response.data.map((r: any) => {
+              const flat = client.flatten(r);
+              const startsAtRaw = (flat.starts_at ?? flat.begins_at ?? null) as string | null;
+              const endsAtRaw = (flat.ends_at ?? null) as string | null;
+              const label = String(flat.name ?? flat.time_type ?? flat.kind ?? flat.service_time_name ?? 'Plan Time');
+              const inferredCategory = /rehearsal|run ?through|sound ?check/i.test(label) ? 'rehearsal' : 'service';
+              return {
+                id: flat.id,
+                label,
+                category: inferredCategory,
+                startsAt: startsAtRaw,
+                endsAt: endsAtRaw,
+                startsAtLocal: startsAtRaw ? formatter.format(new Date(startsAtRaw)) : null,
+                endsAtLocal: endsAtRaw ? formatter.format(new Date(endsAtRaw)) : null,
+              };
+            })
+          : [];
+
+        return JSON.stringify(toolSuccess({
+          planTimes: times,
+          timeZone: parsed.timeZone,
+        }, {
+          count: times.length,
+          pcoEndpoint: endpoint,
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_get_services_preview_summary': {
+        const schema = z.object({
+          previewToken: z.string(),
+        });
+        const parsed = schema.parse(args);
+        const op = previewOperations.get(parsed.previewToken);
+        if (!op) {
+          return JSON.stringify(toolError('Unknown or expired previewToken.'));
+        }
+
+        return JSON.stringify(toolSuccess({
+          previewToken: op.token,
+          kind: op.kind,
+          createdAt: op.createdAt,
+          expiresAt: op.expiresAt,
+          summary: summarizePreviewChanges(op.changes),
+          sampleChanges: op.changes.slice(0, 20),
+        }, {
+          count: op.changes.length,
+          pcoEndpoint: 'services-preview-summary',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_get_services_write_audit_log': {
+        const schema = z.object({
+          limit: z.number().int().positive().max(100).optional().default(20),
+        });
+        const parsed = schema.parse(args);
+        pruneAuditOperations();
+
+        const operations = Array.from(auditOperations.values())
+          .sort((a, b) => new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime())
+          .slice(0, parsed.limit)
+          .map((op) => ({
+            operationId: op.operationId,
+            kind: op.kind,
+            appliedAt: op.appliedAt,
+            sourcePreviewToken: op.sourcePreviewToken,
+            appliedCount: op.applied.length,
+            skippedCount: op.skipped.length,
+            errorCount: op.errors.length,
+            summary: summarizePreviewChanges(op.applied),
+          }));
+
+        return JSON.stringify(toolSuccess({ operations }, {
+          count: operations.length,
+          pcoEndpoint: 'services-write-audit',
+          executionMs: Date.now() - start,
+        }));
+      }
+
+      case 'pco_rollback_services_write_operation': {
+        const schema = z.object({
+          operationId: z.string(),
+          confirmPhrase: z.literal('ROLLBACK_CHANGES'),
+          maxChanges: z.number().int().positive().optional().default(100),
+          requireCurrentValueMatch: z.boolean().optional().default(true),
+        });
+        const parsed = schema.parse(args);
+        const operation = getAuditOperation(parsed.operationId);
+        if (!operation) {
+          return JSON.stringify(toolError('Unknown operationId (or it has expired from audit history).'));
+        }
+
+        if (operation.applied.length > parsed.maxChanges) {
+          return JSON.stringify(toolError(`Operation has ${operation.applied.length} applied changes, exceeding maxChanges=${parsed.maxChanges}.`));
+        }
+
+        const writableError = validateWritableTargets(operation.applied.map((change) => change.serviceTypeId));
+        if (writableError) {
+          return JSON.stringify(toolError(writableError));
+        }
+
+        const rolledBack: PreviewChange[] = [];
+        const skipped: Array<Record<string, unknown>> = [];
+        const errors: Array<Record<string, unknown>> = [];
+
+        for (const change of operation.applied) {
+          const itemEndpoint = `/services/v2/service_types/${change.serviceTypeId}/plans/${change.planId}/items/${change.itemId}`;
+          try {
+            if (parsed.requireCurrentValueMatch) {
+              const current = await client.get<any>(itemEndpoint);
+              const currentFlat = current?.data ? client.flatten(current.data) : null;
+              let mismatch = false;
+              for (const [key, expected] of Object.entries(change.afterAttributes)) {
+                if ((currentFlat as any)?.[key] !== expected) {
+                  mismatch = true;
+                  break;
+                }
+              }
+              if (mismatch) {
+                skipped.push({ ...change, reason: 'Current value no longer matches post-apply state.' });
+                continue;
+              }
+            }
+
+            await client.patch(itemEndpoint, {
+              data: {
+                type: 'Item',
+                attributes: change.beforeAttributes,
+              },
+            });
+            rolledBack.push(change);
+          } catch (err) {
+            errors.push({
+              ...change,
+              error: PlanningCenterClient.formatError(err, 'Services'),
+            });
+          }
+        }
+
+        const rollbackOperationId = `rollback_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+        saveAuditOperation({
+          operationId: rollbackOperationId,
+          kind: operation.kind,
+          appliedAt: new Date().toISOString(),
+          sourcePreviewToken: parsed.operationId,
+          applied: rolledBack.map((change) => ({
+            ...change,
+            beforeAttributes: change.afterAttributes,
+            afterAttributes: change.beforeAttributes,
+            reason: `Rollback of ${parsed.operationId}`,
+          })),
+          skipped,
+          errors,
+        });
+
+        return JSON.stringify(toolSuccess({
+          rollbackOperationId,
+          sourceOperationId: parsed.operationId,
+          attempted: operation.applied.length,
+          rolledBackCount: rolledBack.length,
+          skippedCount: skipped.length,
+          errorCount: errors.length,
+          rolledBack,
+          skipped,
+          errors,
+        }, {
+          count: rolledBack.length,
+          pcoEndpoint: '/services/v2/service_types/*/plans/*/items/*',
+          executionMs: Date.now() - start,
+        }));
+      }
+
       default:
         return JSON.stringify(toolError(`Unknown services tool: ${name}`));
     }
@@ -584,6 +1377,123 @@ export function getServicesToolDefinitions() {
           limit: { type: 'number', description: 'Max results to return (default 20)' },
         },
         required: ['query'],
+      },
+    },
+    {
+      name: 'pco_preview_item_title_replace',
+      description:
+        'Preview bulk item title find/replace across service types and weekend date ranges. This is a dry-run that returns a previewToken and exact item diffs; it does not write changes.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          targetServiceTypeIds: { type: 'array', items: { type: 'string' }, description: 'Service type IDs to scan' },
+          startDate: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+          endDate: { type: 'string', description: 'End date (YYYY-MM-DD)' },
+          findText: { type: 'string', description: 'Text or regex to find' },
+          replaceText: { type: 'string', description: 'Replacement text' },
+          matchMode: { type: 'string', enum: ['exact', 'contains', 'regex'], description: 'Match mode (default exact)' },
+          itemType: { type: 'string', enum: ['song', 'media', 'header', 'regular'], description: 'Optional item type filter' },
+          caseSensitive: { type: 'boolean', description: 'Case sensitive matching (default false)' },
+          maxPlansScanned: { type: 'number', description: 'Safety limit on plans scanned (default 200)' },
+        },
+        required: ['targetServiceTypeIds', 'startDate', 'endDate', 'findText', 'replaceText'],
+      },
+    },
+    {
+      name: 'pco_apply_item_title_replace',
+      description:
+        'Apply a previously previewed title replace operation using previewToken and explicit confirmation phrase. Services-only write operation.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          previewToken: { type: 'string', description: 'Token returned by pco_preview_item_title_replace' },
+          confirmPhrase: { type: 'string', enum: ['APPLY_CHANGES'], description: 'Safety confirmation phrase' },
+          maxChanges: { type: 'number', description: 'Max changes to allow from preview (default 100)' },
+          requireCurrentValueMatch: { type: 'boolean', description: 'Skip if item changed since preview (default true)' },
+        },
+        required: ['previewToken', 'confirmPhrase'],
+      },
+    },
+    {
+      name: 'pco_preview_sync_item_from_reference_plan',
+      description:
+        'Preview syncing selected item fields from one reference plan item to matching items in target plans. Dry-run only; returns previewToken and diffs.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          reference: { type: 'object', description: 'Reference item locator: serviceTypeId, planId, itemSelector' },
+          targets: { type: 'array', items: { type: 'object' }, description: 'Target item locators: serviceTypeId, planId, itemSelector[]' },
+          fields: { type: 'array', items: { type: 'string', enum: ['title', 'description', 'notes'] }, description: 'Fields to sync (default title)' },
+        },
+        required: ['reference', 'targets'],
+      },
+    },
+    {
+      name: 'pco_apply_sync_item_from_reference_plan',
+      description:
+        'Apply a previewed reference sync operation via previewToken and confirmation phrase. Services-only write operation.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          previewToken: { type: 'string', description: 'Token returned by pco_preview_sync_item_from_reference_plan' },
+          confirmPhrase: { type: 'string', enum: ['APPLY_CHANGES'], description: 'Safety confirmation phrase' },
+          maxChanges: { type: 'number', description: 'Max changes to allow from preview (default 100)' },
+          requireCurrentValueMatch: { type: 'boolean', description: 'Skip if item changed since preview (default true)' },
+        },
+        required: ['previewToken', 'confirmPhrase'],
+      },
+    },
+    {
+      name: 'pco_get_plan_times_detailed',
+      description:
+        'Return detailed plan times including rehearsal/service labels and local formatted clock times for a plan.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          serviceTypeId: { type: 'string', description: 'The service type ID' },
+          planId: { type: 'string', description: 'The plan ID' },
+          timeZone: { type: 'string', description: 'IANA timezone for local formatting (default UTC)' },
+        },
+        required: ['serviceTypeId', 'planId'],
+      },
+    },
+    {
+      name: 'pco_get_services_preview_summary',
+      description:
+        'Summarize a preview token into grouped dry-run stats by service type, plan, and item type before applying changes.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          previewToken: { type: 'string', description: 'Token returned from a preview write tool' },
+        },
+        required: ['previewToken'],
+      },
+    },
+    {
+      name: 'pco_get_services_write_audit_log',
+      description:
+        'List recent Services write operations (apply/rollback) with summary counts for auditing.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          limit: { type: 'number', description: 'Max operations to return (default 20, max 100)' },
+        },
+        required: [] as string[],
+      },
+    },
+    {
+      name: 'pco_rollback_services_write_operation',
+      description:
+        'Rollback a prior Services write operation by restoring each changed item to its previous values.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          operationId: { type: 'string', description: 'Operation ID returned by apply tool' },
+          confirmPhrase: { type: 'string', enum: ['ROLLBACK_CHANGES'], description: 'Safety confirmation phrase' },
+          maxChanges: { type: 'number', description: 'Max changes to rollback (default 100)' },
+          requireCurrentValueMatch: { type: 'boolean', description: 'Skip if current item no longer matches applied state (default true)' },
+        },
+        required: ['operationId', 'confirmPhrase'],
       },
     },
   ];

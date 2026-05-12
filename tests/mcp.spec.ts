@@ -650,3 +650,253 @@ test('runs weekend readiness against mocked Services data', async () => {
     await mock.close();
   }
 });
+
+
+
+test('blocks services write previews when allowlist is not configured', async () => {
+  const mock = await startMockPco((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url?.startsWith('/services/v2/service_types/service-1/plans')) {
+      res.end(JSON.stringify({ data: [], meta: { total_count: 0 } }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ errors: [{ detail: 'not found' }] }));
+  });
+
+  const mcp = new McpProcess({
+    PCO_APP_ID: 'test-id',
+    PCO_SECRET: 'test-secret',
+    PCO_BASE_URL: mock.url,
+  });
+
+  try {
+    await mcp.initialize();
+    const response = await mcp.request('tools/call', {
+      name: 'pco_preview_item_title_replace',
+      arguments: {
+        targetServiceTypeIds: ['service-1'],
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        findText: 'KR: Teaching',
+        replaceText: 'BT: Teaching [RESI]',
+      },
+    }, 39);
+
+    const payload = JSON.parse((response.result as any).content[0].text) as { success: boolean; error: string | null };
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain('PCO_WRITABLE_SERVICE_TYPE_IDS');
+  } finally {
+    await mcp.close();
+    await mock.close();
+  }
+});
+test('previews and applies services item title replacement with confirmation', async () => {
+  let itemTitle = 'KR: Teaching';
+
+  const mock = await startMockPco((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const url = req.url ?? '';
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans?') && req.method === 'GET') {
+      res.end(JSON.stringify({
+        data: [{ id: 'plan-1', type: 'Plan', attributes: { sort_date: '2026-05-10T16:00:00Z', title: 'Weekend' } }],
+        meta: { total_count: 1 },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items/item-1') && req.method === 'GET') {
+      res.end(JSON.stringify({
+        data: { id: 'item-1', type: 'Item', attributes: { title: itemTitle, item_type: 'regular', sequence: 10 } },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items/item-1') && req.method === 'PATCH') {
+      let raw = '';
+      req.on('data', (chunk) => { raw += chunk.toString('utf8'); });
+      req.on('end', () => {
+        const body = JSON.parse(raw) as { data?: { attributes?: { title?: string } } };
+        itemTitle = body?.data?.attributes?.title ?? itemTitle;
+        res.end(JSON.stringify({
+          data: { id: 'item-1', type: 'Item', attributes: { title: itemTitle } },
+        }));
+      });
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items') && req.method === 'GET') {
+      res.end(JSON.stringify({
+        data: [{ id: 'item-1', type: 'Item', attributes: { title: itemTitle, item_type: 'regular', sequence: 10 } }],
+        meta: { total_count: 1 },
+      }));
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end(JSON.stringify({ errors: [{ detail: 'not found' }] }));
+  });
+
+  const mcp = new McpProcess({
+    PCO_APP_ID: 'test-id',
+    PCO_SECRET: 'test-secret',
+    PCO_BASE_URL: mock.url,
+    PCO_WRITABLE_SERVICE_TYPE_IDS: 'service-1',
+  });
+
+  try {
+    await mcp.initialize();
+    const preview = await mcp.request('tools/call', {
+      name: 'pco_preview_item_title_replace',
+      arguments: {
+        targetServiceTypeIds: ['service-1'],
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        findText: 'KR: Teaching',
+        replaceText: 'BT: Teaching [RESI]',
+      },
+    }, 40);
+
+    const previewPayload = JSON.parse((preview.result as any).content[0].text) as {
+      success: boolean;
+      data: { previewToken: string; totalChanges: number };
+    };
+    expect(previewPayload.success).toBe(true);
+    expect(previewPayload.data.totalChanges).toBe(1);
+
+    const apply = await mcp.request('tools/call', {
+      name: 'pco_apply_item_title_replace',
+      arguments: {
+        previewToken: previewPayload.data.previewToken,
+        confirmPhrase: 'APPLY_CHANGES',
+      },
+    }, 41);
+
+    const applyPayload = JSON.parse((apply.result as any).content[0].text) as {
+      success: boolean;
+      data: { appliedCount: number; errorCount: number };
+    };
+
+    expect(applyPayload.success).toBe(true);
+    expect(applyPayload.data.appliedCount).toBe(1);
+    expect(applyPayload.data.errorCount).toBe(0);
+    expect(itemTitle).toBe('BT: Teaching [RESI]');
+  } finally {
+    await mcp.close();
+    await mock.close();
+  }
+});
+
+
+test('summarizes preview, audits writes, and rolls back operation', async () => {
+  let itemTitle = 'KR: Teaching';
+
+  const mock = await startMockPco((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const url = req.url ?? '';
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans?') && req.method === 'GET') {
+      res.end(JSON.stringify({
+        data: [{ id: 'plan-1', type: 'Plan', attributes: { sort_date: '2026-05-10T16:00:00Z', title: 'Weekend' } }],
+        meta: { total_count: 1 },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items/item-1') && req.method === 'GET') {
+      res.end(JSON.stringify({
+        data: { id: 'item-1', type: 'Item', attributes: { title: itemTitle, item_type: 'regular', sequence: 10 } },
+      }));
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items/item-1') && req.method === 'PATCH') {
+      let raw = '';
+      req.on('data', (chunk) => { raw += chunk.toString('utf8'); });
+      req.on('end', () => {
+        const body = JSON.parse(raw) as { data?: { attributes?: { title?: string } } };
+        itemTitle = body?.data?.attributes?.title ?? itemTitle;
+        res.end(JSON.stringify({
+          data: { id: 'item-1', type: 'Item', attributes: { title: itemTitle } },
+        }));
+      });
+      return;
+    }
+
+    if (url.startsWith('/services/v2/service_types/service-1/plans/plan-1/items') && req.method === 'GET') {
+      res.end(JSON.stringify({
+        data: [{ id: 'item-1', type: 'Item', attributes: { title: itemTitle, item_type: 'regular', sequence: 10 } }],
+        meta: { total_count: 1 },
+      }));
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end(JSON.stringify({ errors: [{ detail: 'not found' }] }));
+  });
+
+  const mcp = new McpProcess({
+    PCO_APP_ID: 'test-id',
+    PCO_SECRET: 'test-secret',
+    PCO_BASE_URL: mock.url,
+    PCO_WRITABLE_SERVICE_TYPE_IDS: 'service-1',
+  });
+
+  try {
+    await mcp.initialize();
+    const preview = await mcp.request('tools/call', {
+      name: 'pco_preview_item_title_replace',
+      arguments: {
+        targetServiceTypeIds: ['service-1'],
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        findText: 'KR: Teaching',
+        replaceText: 'BT: Teaching [RESI]',
+      },
+    }, 50);
+
+    const previewPayload = JSON.parse((preview.result as any).content[0].text) as { data: { previewToken: string } };
+
+    const summary = await mcp.request('tools/call', {
+      name: 'pco_get_services_preview_summary',
+      arguments: { previewToken: previewPayload.data.previewToken },
+    }, 51);
+    const summaryPayload = JSON.parse((summary.result as any).content[0].text) as { success: boolean; data: { summary: { totalChanges: number } } };
+    expect(summaryPayload.success).toBe(true);
+    expect(summaryPayload.data.summary.totalChanges).toBe(1);
+
+    const apply = await mcp.request('tools/call', {
+      name: 'pco_apply_item_title_replace',
+      arguments: {
+        previewToken: previewPayload.data.previewToken,
+        confirmPhrase: 'APPLY_CHANGES',
+      },
+    }, 52);
+    const applyPayload = JSON.parse((apply.result as any).content[0].text) as { data: { operationId: string } };
+
+    const audit = await mcp.request('tools/call', {
+      name: 'pco_get_services_write_audit_log',
+      arguments: { limit: 5 },
+    }, 53);
+    const auditPayload = JSON.parse((audit.result as any).content[0].text) as { success: boolean; data: { operations: Array<{ operationId: string }> } };
+    expect(auditPayload.success).toBe(true);
+    expect(auditPayload.data.operations.some((op) => op.operationId === applyPayload.data.operationId)).toBe(true);
+
+    const rollback = await mcp.request('tools/call', {
+      name: 'pco_rollback_services_write_operation',
+      arguments: {
+        operationId: applyPayload.data.operationId,
+        confirmPhrase: 'ROLLBACK_CHANGES',
+      },
+    }, 54);
+
+    const rollbackPayload = JSON.parse((rollback.result as any).content[0].text) as { success: boolean; data: { rolledBackCount: number } };
+    expect(rollbackPayload.success).toBe(true);
+    expect(rollbackPayload.data.rolledBackCount).toBe(1);
+    expect(itemTitle).toBe('KR: Teaching');
+  } finally {
+    await mcp.close();
+    await mock.close();
+  }
+});
